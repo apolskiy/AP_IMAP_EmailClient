@@ -367,6 +367,7 @@ AP_IMAP_EmailClient/
 ├── CLAUDE.md                  # AI collaborator instructions: safeguards, structure, naming
 ├── CLAUDE_LOG.md              # Architectural decisions and pylint scores, by phase
 ├── .claude/
+│   ├── README.md              # What the AI collaborator's configuration contains
 │   └── rules/                 # Rules the AI collaborator followed throughout the project
 │       ├── claude_md_shell_rules.md   # Shell use on Windows: no heredocs, scripts run by file
 │       ├── code-style.md              # Naming, private state, SPDX header
