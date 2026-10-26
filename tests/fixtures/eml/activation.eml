@@ -1,0 +1,59 @@
+Date: Mon, 21 Sep 2026 10:15:02 +0000
+From: Example Cloud <noreply@cloud.example.com>
+To: qa+5e0c7a31@example.com
+Subject: Activate your Example =?utf-8?q?Cloud=E2=84=A2?= account
+Message-ID: <20260921101502.4f8a2c61e9b3@cloud.example.com>
+MIME-Version: 1.0
+Content-Type: multipart/alternative;
+ boundary="===============3241319324262373316=="
+
+--===============3241319324262373316==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+
+Welcome to Example Cloud=E2=84=A2
+
+Hello,
+
+Thank you for signing up. To finish creating your account, open the link belo=
+w:
+
+https://cloud.example.com/activate?code=3DeyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ=
+9.eyJzdWIiOiJxYSs1ZTBjN2EzMUBleGFtcGxlLmNvbSIsImV4cCI6MTc5MDA3MjEwMn0.26BhCE-=
+jyNF95wsG0HxupxhABvmyoCh4tAMHIU_coy8&lang=3Den
+
+The link expires in 24 hours. If you did not create an account, ignore this e=
+mail.
+
+Website: https://www.example.com
+Support: https://support.example.com
+
+--===============3241319324262373316==
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+
+<!DOCTYPE html>
+<html>
+<body style=3D"margin: 0; font-family: Arial, sans-serif; color: #1f2933;">
+<a href=3D"https://cloud.example.com/?utm_source=3Demail&amp;utm_campaign=3Da=
+ctivation"><img class=3D"logo" src=3D"https://cloud.example.com/static/logo.p=
+ng" alt=3D"Example Cloud" width=3D"120"></a>
+<h1>Welcome to Example Cloud=E2=84=A2</h1>
+<p>Hello,</p>
+<p>Thank you for signing up. To finish creating your account, confirm your em=
+ail address.</p>
+<p><a class=3D"btn" style=3D"display: inline-block; padding: 12px 24px; color=
+: #ffffff; background: #2b7de9; text-decoration: none;" href=3D"https://cloud=
+.example.com/activate?code=3DeyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ=
+xYSs1ZTBjN2EzMUBleGFtcGxlLmNvbSIsImV4cCI6MTc5MDA3MjEwMn0.26BhCE-jyNF95wsG0Hxu=
+pxhABvmyoCh4tAMHIU_coy8&amp;lang=3Den">Activate account</a></p>
+<p>The link expires in 24 hours. If you did not create an account, ignore thi=
+s email.</p>
+<p><b>Website</b><br><a href=3D"https://www.example.com">www.example.com</a><=
+/p>
+<p><b>Support</b><br><a href=3D"https://support.example.com">support.example.=
+com</a></p>
+</body>
+</html>
+
+--===============3241319324262373316==--

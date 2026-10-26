@@ -1,0 +1,23 @@
+# SPDX-FileCopyrightText: 2026 Aleksandr Polskiy
+# SPDX-License-Identifier: Apache-2.0
+
+[project]
+name = "ap-imap-emailclient"
+version = "0.1.0"
+description = "IMAP reader library and test harness that waits for application emails and extracts their call-to-action links."
+readme = "README.md"
+requires-python = ">=3.14"
+license = "Apache-2.0"
+authors = [{ name = "Aleksandr Polskiy" }]
+dependencies = [
+    "beautifulsoup4==4.14.3",
+    "python-dotenv==1.2.2",
+]
+
+[tool.pytest.ini_options]
+# Design §4: EMI naming instead of pytest's default test_* collection.
+python_files = ["emi_*.py"]
+python_classes = ["TestEMI*"]
+python_functions = ["EMI_*"]
+testpaths = ["unittests", "tests"]
+addopts = "-p no:randomly"

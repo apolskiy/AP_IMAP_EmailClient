@@ -1,0 +1,6 @@
+{
+  "name": "invitation",
+  "kind": "invitation",
+  "source_eml": "tests/fixtures/eml/site_invitation.eml",
+  "cta_label": "Accept invitation"
+}
