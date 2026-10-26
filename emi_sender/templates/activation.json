@@ -1,0 +1,6 @@
+{
+  "name": "activation",
+  "kind": "activation",
+  "source_eml": "tests/fixtures/eml/activation.eml",
+  "cta_label": "Activate account"
+}

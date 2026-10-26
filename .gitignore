@@ -1,3 +1,32 @@
+# PyCharm
+.idea/
+
+# Python Virtual Environments
+.venv/
+venv/
+ENV/
+build/
+dist/
+*.egg-info/
+
+# Python Cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Test Reports & Allure Data: results never go into the repository; only the empty reports/ folder does
+reports/*
+!reports/.gitkeep
+allure-results/
+allure-report/
+.pytest_cache/
+
+# Environment & Logs
+.env
+.DS_Store
+.claude/logs/
+logs/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

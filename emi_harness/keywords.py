@@ -1,0 +1,35 @@
+# SPDX-FileCopyrightText: 2026 Aleksandr Polskiy
+# SPDX-License-Identifier: Apache-2.0
+"""Keywords the harness raises (catalog: ``docs/keywords.md``)."""
+
+from enum import StrEnum
+
+
+class HarnessKeyword(StrEnum):
+    """Failures of the harness itself (``HARNESS_`` prefix)."""
+
+    PROBE_EMAIL_NOT_RECEIVED = "HARNESS_PROBE_EMAIL_NOT_RECEIVED"
+    DOCKER_UNAVAILABLE = "HARNESS_DOCKER_UNAVAILABLE"
+    DUPLICATE_TEST_ID = "HARNESS_DUPLICATE_TEST_ID"
+
+
+class CaseKeyword(StrEnum):
+    """Test-case outcomes the harness detects (``CASE_`` prefix)."""
+
+    VERIFICATION_FAILED = "CASE_VERIFICATION_FAILED"
+    UNEXPECTED_ERROR = "CASE_UNEXPECTED_ERROR"
+    STEP_TIMEOUT = "CASE_STEP_TIMEOUT"
+    TIMEOUT = "CASE_TIMEOUT"
+    CLEANUP_FAILED = "CASE_CLEANUP_FAILED"
+    CONDITION_INVALID_INPUT = "CASE_CONDITION_INVALID_INPUT"
+    DEPENDENCY_SKIPPED = "CASE_DEPENDENCY_SKIPPED"
+
+
+class JobKeyword(StrEnum):
+    """Decisions about the whole job (``JOB_`` prefix)."""
+
+    CRITICAL_FUNCTIONAL_FAILURE = "JOB_CRITICAL_FUNCTIONAL_FAILURE"
+    CIRCUIT_BREAKER_OPEN = "JOB_CIRCUIT_BREAKER_OPEN"
+    PRIORITY_DOWNGRADED = "JOB_PRIORITY_DOWNGRADED"
+    PRIORITY_P0_OVERFLOW = "JOB_PRIORITY_P0_OVERFLOW"
+    TIMEOUT = "JOB_TIMEOUT"

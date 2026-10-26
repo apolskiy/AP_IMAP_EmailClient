@@ -1,0 +1,2 @@
+# Sample emails are byte-exact MIME fixtures (CRLF line endings); never normalize them.
+*.eml -text

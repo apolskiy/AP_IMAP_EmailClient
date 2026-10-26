@@ -1,0 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Aleksandr Polskiy
+# SPDX-License-Identifier: Apache-2.0
+# Runtime dependencies, pinned exactly (design §14).
+beautifulsoup4==4.14.3
+python-dotenv==1.2.2
