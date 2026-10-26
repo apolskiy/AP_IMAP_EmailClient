@@ -121,6 +121,16 @@ class _Target:
     cta: Cta | None
     test_id: str | None
     run_id: str | None
+    match_fields: tuple[str, ...]
+
+
+def _match_fields(requested: tuple[str, ...] | None, default: tuple[str, ...]) -> tuple[str, ...]:
+    """The recipient fields for one wait: the requested ones (validated) or the mailbox default."""
+    fields = tuple(name.lower() for name in (default if requested is None else requested))
+    unknown = [name for name in fields if name not in _SEARCH_KEYS]
+    if unknown or not fields:
+        raise ValueError(f"match_fields must be a non-empty subset of {sorted(_SEARCH_KEYS)}, got {list(requested)}")
+    return fields
 
 
 def _case_key(test_id: str) -> str:
@@ -200,6 +210,7 @@ class Mailbox:
         timeout: float = 60.0,
         test_id: str | None = None,
         run_id: str | None = None,
+        match_fields: tuple[str, ...] | None = None,
     ) -> list[ReceivedEmail]:
         """Wait until exactly ``count`` matching emails are present.
 
@@ -210,6 +221,8 @@ class Mailbox:
             timeout: Seconds to wait.
             test_id: Required ``X-EMI-Test-Id`` marker (sender-generated mail).
             run_id: Required ``X-EMI-Run-Id`` marker.
+            match_fields: Recipient fields for this wait (``to``, ``cc``, ``bcc``, ``delivered-to``,
+                ``x-original-to``); the mailbox's ``WaitOptions.match_fields`` by default.
 
         Returns:
             The matching emails, oldest first.
@@ -222,7 +235,8 @@ class Mailbox:
         """
         if count < 1:
             raise ValueError(f"count must be at least 1, got {count}")
-        target = _Target(address.strip().lower(), cta, test_id, run_id)
+        target = _Target(address.strip().lower(), cta, test_id, run_id,
+                         _match_fields(match_fields, self._options.match_fields))
         found = self._wait(target, timeout, lambda matches: len(matches) >= count, settle=True)
         if len(found) > count:
             raise EmailWaitError(
@@ -241,6 +255,7 @@ class Mailbox:
         timeout: float = 60.0,
         test_id: str | None = None,
         run_id: str | None = None,
+        match_fields: tuple[str, ...] | None = None,
     ) -> str:
         """Wait for an email with the given button and return its link (newest if several).
 
@@ -250,11 +265,13 @@ class Mailbox:
             timeout: Seconds to wait.
             test_id: Required ``X-EMI-Test-Id`` marker (sender-generated mail).
             run_id: Required ``X-EMI-Run-Id`` marker.
+            match_fields: Recipient fields for this wait; the mailbox default when None.
 
         Returns:
             The CTA link.
         """
-        target = _Target(address.strip().lower(), cta, test_id, run_id)
+        target = _Target(address.strip().lower(), cta, test_id, run_id,
+                         _match_fields(match_fields, self._options.match_fields))
         found = self._wait(target, timeout, lambda matches: len(matches) >= 1, settle=False)
         if len(found) > 1:
             _LOGGER.warning("%s: %d emails for %s; using the newest",
@@ -378,14 +395,14 @@ class Mailbox:
             status = transport.examine(entry.folder)
             cursor = _Cursor(entry.folder, status.uidvalidity, status.uidnext)
             state.cursors.append(cursor)
-            self._consider(state, target, cursor.folder, self._search_address(transport, target.address))
+            self._consider(state, target, cursor.folder, self._search_address(transport, target))
         return state
 
-    def _search_address(self, transport: ImapTransport, address: str) -> list[int]:
+    def _search_address(self, transport: ImapTransport, target: _Target) -> list[int]:
         """Server-side search per selected field; only narrows candidates."""
         uids: set[int] = set()
-        for name in self._options.match_fields:
-            uids.update(transport.uid_search((*_SEARCH_KEYS[name.lower()], f'"{address}"')))
+        for name in target.match_fields:
+            uids.update(transport.uid_search((*_SEARCH_KEYS[name], f'"{target.address}"')))
         return sorted(uids)
 
     def _poll(self, state: _WaitState, target: _Target) -> None:
@@ -400,7 +417,7 @@ class Mailbox:
                     key: value for key, value in state.matches.items() if key[0] != cursor.folder
                 }
                 cursor.uidvalidity, cursor.next_uid = status.uidvalidity, status.uidnext
-                self._consider(state, target, cursor.folder, self._search_address(transport, target.address))
+                self._consider(state, target, cursor.folder, self._search_address(transport, target))
                 continue
             if status.uidnext <= cursor.next_uid:
                 continue
@@ -425,7 +442,7 @@ class Mailbox:
 
     def _header_match(self, headers: ParsedEmail, target: _Target) -> bool:
         """Exact, case-insensitive recipient match on the selected fields, plus the markers."""
-        if target.address not in headers.addresses_in(self._options.match_fields):
+        if target.address not in headers.addresses_in(target.match_fields):
             return False
         if target.test_id is not None and _case_key(headers.test_id) != _case_key(target.test_id):
             return False
