@@ -128,6 +128,14 @@ class TestEMIBrokerHttp:
             client.send("activation", _ADDRESS, marker=cyrillic)
         assert caught.value.primary == SenderCaseKeyword.CONDITION_INVALID_INPUT
 
+    def EMI_TEST_BROKER_UNIT_130079_match_fields_over_http(self, running: tuple[BrokerClient, SimMailboxes]) -> None:
+        """The client sends the recipient fields over HTTP and the reader receives them."""
+        client, mailboxes = running
+        client.wait_for_emails("qa+C400001_r@example.com", match_fields=("cc",), timeout=5.0)
+        client.wait_for_link("qa+C400001_r@example.com", Cta.ACTIVATE_ACCOUNT, timeout=5.0)
+        fields = [wait["match_fields"] for mailbox in mailboxes.built for wait in mailbox.waits]
+        assert fields == [("cc",), None]
+
     def EMI_TEST_BROKER_UNIT_130054_post_needs_the_token(self, running: tuple[BrokerClient, SimMailboxes]) -> None:
         """A request with a wrong token is refused (401) even after re-reading the state file."""
         client, _mailboxes = running

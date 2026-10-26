@@ -80,6 +80,14 @@ class TestEMIBrokerSendAndWait:
         assert [item["uid"] for item in answer["emails"]] == [1, 2]
         assert answer["emails"][0]["email"]["recipients"]["to"] == [_ADDRESS]
 
+    def EMI_TEST_BROKER_UNIT_130078_match_fields_reach_the_reader(self, tmp_path: Path) -> None:
+        """Recipient fields in the request are passed to the reader; absent fields keep its default."""
+        service, mailboxes, *_sims = make_service(tmp_path)
+        service.wait({**_WAIT, "mode": "emails", "match_fields": ["cc", "bcc"]})
+        service.wait(dict(_WAIT))
+        waits = mailboxes.built[0].waits
+        assert waits[0]["match_fields"] == ("cc", "bcc") and waits[1]["match_fields"] is None
+
     def EMI_TEST_BROKER_UNIT_130014_connection_reused_between_waits(self, tmp_path: Path) -> None:
         """A pooled mailbox (open IMAP connection) serves the next wait."""
         service, mailboxes, *_sims = make_service(tmp_path)

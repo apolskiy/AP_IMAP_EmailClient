@@ -85,6 +85,16 @@ class TestEMIApiInprocess:
         api.sender.send("activation", address=run.address(), count=1)
         assert len(seen) == 1
 
+    def EMI_API_UNIT_300049_match_fields_passed_through(self, tmp_path: Path) -> None:
+        """api.reader waits pass the recipient fields through to the reader (in-process mode)."""
+        api, mailboxes, _sender = _inprocess(tmp_path)
+        run = api.start_run("400001")
+        api.reader.wait_for_link(run.address(), Cta.ACTIVATE_ACCOUNT, match_fields=("cc",))
+        api.reader.wait_for_emails(run.address(), match_fields=("bcc", "delivered-to"))
+        api.reader.wait_for_emails(run.address())
+        fields = [wait["match_fields"] for wait in mailboxes.built[0].waits]
+        assert fields == [("cc",), ("bcc", "delivered-to"), None]
+
     def EMI_API_UNIT_300041_wait_for_link_default_timeout(self, tmp_path: Path) -> None:
         """Waits use the settings' wait timeout unless given one."""
         api, mailboxes, _sender = _inprocess(tmp_path)

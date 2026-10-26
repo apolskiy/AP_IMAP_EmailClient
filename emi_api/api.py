@@ -213,7 +213,7 @@ class ReaderApi:
 
     def wait_for_link(  # pylint: disable=too-many-arguments
         self, address: str, cta: Cta, timeout: float | None = None, *, test_id: str | None = None,
-        run_id: str | None = None,
+        run_id: str | None = None, match_fields: tuple[str, ...] | None = None,
     ) -> str:
         """Wait for an email with the given button and return its link.
 
@@ -223,16 +223,18 @@ class ReaderApi:
             timeout: Seconds to wait; the settings' ``wait_timeout`` by default.
             test_id: Also require this test marker.
             run_id: Also require this run marker.
+            match_fields: Recipient fields the address must appear in (``to``, ``cc``, ``bcc``,
+                ``delivered-to``, ``x-original-to``); ``To`` only by default.
 
         Returns:
             The CTA link.
         """
         return self._backend.wait_for_link(address, cta, timeout=timeout or self._default_timeout,
-                                           test_id=test_id, run_id=run_id)
+                                           test_id=test_id, run_id=run_id, match_fields=match_fields)
 
     def wait_for_emails(  # pylint: disable=too-many-arguments
         self, address: str, cta: Cta | None = None, count: int = 1, timeout: float | None = None, *,
-        test_id: str | None = None, run_id: str | None = None,
+        test_id: str | None = None, run_id: str | None = None, match_fields: tuple[str, ...] | None = None,
     ) -> list[ReceivedEmail]:
         """Wait until exactly ``count`` matching emails are present.
 
@@ -243,13 +245,14 @@ class ReaderApi:
             timeout: Seconds to wait; the settings' ``wait_timeout`` by default.
             test_id: Also require this test marker.
             run_id: Also require this run marker.
+            match_fields: Recipient fields the address must appear in; ``To`` only by default.
 
         Returns:
             The emails, oldest first.
         """
         return self._backend.wait_for_emails(address, cta=cta, count=count,
                                              timeout=timeout or self._default_timeout, test_id=test_id,
-                                             run_id=run_id)
+                                             run_id=run_id, match_fields=match_fields)
 
 
 class EmiApi:  # pylint: disable=too-many-instance-attributes

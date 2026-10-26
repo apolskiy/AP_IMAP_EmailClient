@@ -137,6 +137,26 @@ class TestEMIReaderRecipientFields:
         with pytest.raises(ValueError):
             WaitOptions(match_fields=("reply-to",))
 
+    def EMI_READER_UNIT_100115_fields_chosen_per_wait(self) -> None:
+        """One mailbox (To-only by default) matches Cc for a single wait when that wait asks for it."""
+        clock = SimClock()
+        server = SimImap(clock)
+        server.deliver("INBOX", make_email(to_addr="someone@example.com", cc_addr=_ADDRESS))
+        mailbox = _mailbox(server, clock)
+        assert len(mailbox.wait_for_emails(_ADDRESS, timeout=4.0, match_fields=("CC",))) == 1
+        assert "/activate?" in mailbox.wait_for_link(_ADDRESS, Cta.ACTIVATE_ACCOUNT, match_fields=("cc",))
+        with pytest.raises(EmailWaitError):
+            mailbox.wait_for_emails(_ADDRESS, timeout=4.0)
+
+    @pytest.mark.parametrize("fields", [(), ("reply-to",)])
+    def EMI_READER_UNIT_100116_per_wait_fields_validated(self, fields: tuple[str, ...]) -> None:
+        """Empty or unknown per-wait fields are refused before anything is searched."""
+        clock = SimClock()
+        server = SimImap(clock)
+        with pytest.raises(ValueError, match="match_fields"):
+            _mailbox(server, clock).wait_for_emails(_ADDRESS, timeout=4.0, match_fields=fields)
+        assert not server.calls
+
 
 class TestEMIReaderCounts:
     """Exact counts, duplicates and the settle window."""

@@ -168,7 +168,11 @@ Details and server limits: §11.
 * **Recipient match**: exact, case-insensitive, on the selected `match_fields` (**default `To` only**;
   any combination of `To`, `Cc`, `Bcc`, `Delivered-To`, `X-Original-To`), parsed with
   `email.utils.getaddresses`. Server search only narrows candidates (Greenmail matches exactly, Gmail by
-  tokens, RFC 3501 by substring); the client-side check decides.
+  tokens, RFC 3501 by substring); the client-side check decides. The fields are a mailbox default
+  (`WaitOptions`) and can be chosen **per wait** (`match_fields=` on every wait call, through `EmiApi`
+  and the test broker), so one pooled connection serves `To`-only and `Cc` waits alike. A `Bcc`
+  recipient is not visible in received headers; it is matched on `Delivered-To` (the sender stamps it,
+  as Gmail does).
 * **Match** = address + requested CTA + (sender-generated mail) the test/run marker. Emails without the
   CTA are not errors, just not matches.
 * **Duplicates**: `wait_for_link` returns the newest match and logs `CASE_DUPLICATE_DELIVERY` when there

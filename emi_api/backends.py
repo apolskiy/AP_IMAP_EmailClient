@@ -29,13 +29,13 @@ class MailBackend(Protocol):
 
     def wait_for_link(  # pylint: disable=too-many-arguments
         self, address: str, cta: Cta, *, timeout: float = 60.0, test_id: str | None = None,
-        run_id: str | None = None,
+        run_id: str | None = None, match_fields: tuple[str, ...] | None = None,
     ) -> str:
         """Wait for an email with the given button and return its link."""
 
     def wait_for_emails(  # pylint: disable=too-many-arguments
         self, address: str, *, cta: Cta | None = None, count: int = 1, timeout: float = 60.0,
-        test_id: str | None = None, run_id: str | None = None,
+        test_id: str | None = None, run_id: str | None = None, match_fields: tuple[str, ...] | None = None,
     ) -> list[ReceivedEmail]:
         """Wait until exactly ``count`` matching emails are present."""
 
@@ -94,7 +94,7 @@ class LocalBroker:
 
     def wait_for_link(  # pylint: disable=too-many-arguments
         self, address: str, cta: Cta, *, timeout: float = 60.0, test_id: str | None = None,
-        run_id: str | None = None,
+        run_id: str | None = None, match_fields: tuple[str, ...] | None = None,
     ) -> str:
         """Wait for an email with the given button and return its link.
 
@@ -104,17 +104,18 @@ class LocalBroker:
             timeout: Seconds to wait.
             test_id: Required test marker.
             run_id: Required run marker.
+            match_fields: Recipient fields the address must appear in; ``To`` only by default.
 
         Returns:
             The CTA link.
         """
         payload = {"address": address, "cta": cta_to_json(cta), "mode": "link", "timeout": timeout,
-                   "test_id": test_id, "run_id": run_id}
+                   "test_id": test_id, "run_id": run_id, "match_fields": _fields(match_fields)}
         return str(self._service.wait(payload)["link"])
 
     def wait_for_emails(  # pylint: disable=too-many-arguments
         self, address: str, *, cta: Cta | None = None, count: int = 1, timeout: float = 60.0,
-        test_id: str | None = None, run_id: str | None = None,
+        test_id: str | None = None, run_id: str | None = None, match_fields: tuple[str, ...] | None = None,
     ) -> list[ReceivedEmail]:
         """Wait until exactly ``count`` matching emails are present.
 
@@ -125,12 +126,14 @@ class LocalBroker:
             timeout: Seconds to wait.
             test_id: Required test marker.
             run_id: Required run marker.
+            match_fields: Recipient fields the address must appear in; ``To`` only by default.
 
         Returns:
             The emails, oldest first.
         """
         payload = {"address": address, "cta": cta_to_json(cta), "mode": "emails", "count": count,
-                   "timeout": timeout, "test_id": test_id, "run_id": run_id}
+                   "timeout": timeout, "test_id": test_id, "run_id": run_id,
+                   "match_fields": _fields(match_fields)}
         return [received_from_json(item) for item in self._service.wait(payload)["emails"]]
 
     def close(self) -> None:
@@ -157,3 +160,8 @@ def holder_name(mode: str) -> str:
 def _marker(marker: Marker | None) -> dict[str, str]:
     """Marker as the service's JSON shape."""
     return {"test_id": marker.test_id, "run_id": marker.run_id} if marker else {}
+
+
+def _fields(match_fields: tuple[str, ...] | None) -> list[str] | None:
+    """Recipient fields as JSON (None keeps the reader's default)."""
+    return list(match_fields) if match_fields is not None else None

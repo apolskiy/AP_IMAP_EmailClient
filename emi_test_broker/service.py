@@ -142,7 +142,8 @@ class BrokerService:  # pylint: disable=too-many-instance-attributes
         """``POST /wait``: long-poll for a test's email (time queued for a connection counts).
 
         Args:
-            payload: ``{"address", "cta", "mode": "link"|"emails", "count", "timeout", "test_id", "run_id"}``.
+            payload: ``{"address", "cta", "mode": "link"|"emails", "count", "timeout", "test_id", "run_id",
+                "match_fields"}``.
 
         Returns:
             ``{"link": ...}`` or ``{"emails": [...]}``, plus the accessibility matrix and retried attempts.
@@ -152,6 +153,8 @@ class BrokerService:  # pylint: disable=too-many-instance-attributes
         run_id = payload.get("run_id") or None
         test_id = payload.get("test_id") or None
         cta = cta_from_json(payload.get("cta"))
+        fields = payload.get("match_fields")
+        match_fields = tuple(str(name) for name in fields) if fields is not None else None
         started = self._clock()
         result: dict[str, Any] = {}
         with self._leases.waiting(run_id or ""), self._slot(timeout):
@@ -161,13 +164,14 @@ class BrokerService:  # pylint: disable=too-many-instance-attributes
             try:
                 if payload.get("mode", "link") == "emails":
                     found = mailbox.wait_for_emails(address, cta=cta, count=int(payload.get("count", 1)),
-                                                    timeout=remaining, test_id=test_id, run_id=run_id)
+                                                    timeout=remaining, test_id=test_id, run_id=run_id,
+                                                    match_fields=match_fields)
                     result = {"emails": [received_to_json(item) for item in found]}
                 else:
                     if cta is None:
                         raise ValueError("request field 'cta' is required for mode 'link'")
                     result = {"link": mailbox.wait_for_link(address, cta, timeout=remaining, test_id=test_id,
-                                                            run_id=run_id)}
+                                                            run_id=run_id, match_fields=match_fields)}
                 healthy = True
             finally:
                 self._return_mailbox(mailbox, healthy)
