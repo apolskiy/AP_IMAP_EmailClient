@@ -49,6 +49,7 @@ live in `docs/design/phase0_email_client_ambiguities.md`; this log records when 
 | 2026-10-27 | The gate counts a selected test without a result as not passed (`JOB_RESULT_MISSING`): a CI P2-P4 job hit its 1 h budget after 748 tests, its workers crashed on a keyword enum, the remaining tests left no result, and the gate passed at 758/759 | Design §9.7 |
 | 2026-10-27 | Windows CI: Greenmail started through WMI, because a step's child process ends with the step on Windows runners | Design §12 |
 | 2026-10-27 | The status workflow is `joint-ci-workflow`; a manual run ticks its functional jobs; P2, P3 and P4 run as three jobs side by side, their 85% measured together by `quality-gate` | AMB-66, AMB-67 |
+| 2026-10-27 | `--priority` accepts any case, and the gate is told which jobs were chosen (`--expect`): a chosen job without a `collection.json` fails it (`JOB_RESULT_MISSING`), checked per OS. CI run 40436448076 passed the gate on 10 of 1,016 tests after its P2, P3 and P4 jobs exited on a lowercase `--priority p2` | Design §9.7 |
 
 ## Pylint scores
 

@@ -152,13 +152,36 @@ jobs:
             requirements.txt
             requirements-dev.txt
       - run: python -m pip install -r requirements.txt -r requirements-dev.txt
-      - name: Download both operating systems' reports
+      # One folder per operating system, so the gate checks each one for every chosen job.
+      - name: Download the Ubuntu reports
         uses: actions/download-artifact@v4
         with:
-          pattern: reports-*
-          path: all-reports
+          pattern: reports-ubuntu-*
+          path: all-reports/ubuntu
+          merge-multiple: true
+      - name: Download the Windows reports
+        uses: actions/download-artifact@v4
+        with:
+          pattern: reports-windows-*
+          path: all-reports/windows
+          merge-multiple: true
+      # A chosen job that left no collection (it never started) fails the gate: its tests never ran.
       - name: Quality gates over both operating systems
-        run: python -m emi_harness.gate all-reports
+        env:
+          MANUAL: ${{ github.event_name == 'workflow_dispatch' }}
+          RUN_P0: ${{ inputs.p0 }}
+          RUN_P1: ${{ inputs.p1 }}
+          RUN_P2: ${{ inputs.p2 }}
+          RUN_P3: ${{ inputs.p3 }}
+          RUN_P4: ${{ inputs.p4 }}
+        run: |
+          expect=()
+          for job in P0 P1 P2 P3 P4; do
+            chosen="RUN_$job"
+            if [ "$MANUAL" != "true" ] || [ "${!chosen}" = "true" ]; then expect+=(--expect "$job"); fi
+          done
+          mkdir -p all-reports/ubuntu all-reports/windows
+          python -m emi_harness.gate all-reports/ubuntu all-reports/windows "${expect[@]}"
       - name: Build the Allure report once, from both operating systems
         if: always()
         env:

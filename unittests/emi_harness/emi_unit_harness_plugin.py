@@ -12,7 +12,7 @@ from emi_harness.cli import EXIT_ABORTED, EXIT_FAILED, EXIT_PASSED, EXIT_USAGE, 
 from emi_harness.gate import main as gate_main
 from emi_harness.jobs import JobController
 from emi_harness.keywords import CaseKeyword, HarnessKeyword, JobKeyword
-from emi_harness.priorities import Job
+from emi_harness.priorities import Job, job_name
 from emi_harness.results import ResultsWriter, job_dir, load_results
 from emi_reader import ReaderKeyword
 
@@ -389,6 +389,32 @@ class TestEMIHarnessCli:
         captured = capsys.readouterr()
         assert "JOB_RESULT_MISSING: C400402 (P2) was selected by job P2" in captured.err
         assert "1/2" in captured.out
+
+    def EMI_HARNESS_UNIT_200147_gate_fails_on_absent_job(self, tmp_path: Path,
+                                                          capsys: pytest.CaptureFixture[str]) -> None:
+        """A chosen job without a collection (it never started) fails the gate, per OS directory.
+
+        CI run 40436448076: the P2, P3 and P4 jobs exited on a usage error before collecting, and the gate
+        passed P0 and P1 alone at 10/10 while 1,006 tests never ran.
+        """
+        for system in ("ubuntu", "windows"):
+            writer = ResultsWriter(tmp_path / system / "P0", "main")
+            writer.write(_outcome("C400501", "P0", Status.PASSED, "P0"))
+            selected = [{"nodeid": "tests/emi_func_demo.py::C400501", "case_id": "C400501", "priority": "P0"}]
+            (tmp_path / system / "P0" / "collection.json").write_text(json.dumps({"selected": selected}),
+                                                                       encoding="utf-8")
+        directories = [str(tmp_path / "ubuntu"), str(tmp_path / "windows")]
+        assert gate_main([*directories, "--expect", "P0"]) == 0
+        assert gate_main([*directories, "--expect", "p0", "--expect", "p2"]) == 1  # any case, as CI's matrix
+        captured = capsys.readouterr()
+        assert captured.err.count("JOB_RESULT_MISSING: job P2 left no collection.json") == 2
+        (tmp_path / "windows" / "P0" / "collection.json").unlink()
+        assert gate_main([*directories, "--expect", "P0"]) == 1
+
+    def EMI_HARNESS_UNIT_200148_job_names_any_case(self) -> None:
+        """Job names are accepted in any case and returned in the job's own case; unknown names pass through."""
+        assert [job_name(value) for value in ("p3", " P2-p4 ", "ALL", "Debug", "p9")] == [
+            "P3", "P2-P4", "all", "debug", "p9"]
 
     def EMI_HARNESS_UNIT_200119_gate_refuses_fault_runs(self, tmp_path: Path,
                                                          capsys: pytest.CaptureFixture[str]) -> None:

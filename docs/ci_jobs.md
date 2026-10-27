@@ -108,7 +108,7 @@ Run these from the repository root after the Greenmail setup in the README. They
 | `unit-emi-greenmail` | `python -m pytest unittests/emi_greenmail` |
 | `unit-emi-harness` | `python -m pytest unittests/emi_harness` |
 | `functional-p0` … `functional-p4` | `python -m emi_harness.cli --priority P0` (or `P1`, `P2`, `P3`, `P4`; locally also `P2-P4` as one job, which itself needs 85%) |
-| `quality-gate` | `python -m emi_harness.gate reports/<run>` |
+| `quality-gate` | `python -m emi_harness.gate <ubuntu reports> <windows reports> --expect P0 ... --expect P4` (one `--expect` per chosen job) |
 | `ci-debug-run` | `python -m emi_harness.cli --test <name>` / `--file <list.txt>` / `--keyword <KEYWORD>` |
 | `test-validity` | `python -m emi_harness.validity faults [--fault <name>]`; `python -m emi_harness.validity stability --priority P1 --repeat 3` |
 

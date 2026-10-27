@@ -481,6 +481,11 @@ test SKIP; job stops.
   its selection in `collection.json`, and a selected test without a result (a crashed worker, a runner
   killed at its timeout) counts as not passed, `JOB_RESULT_MISSING`. Without this, lost results shrank
   the measured set: a CI run whose P2-P4 job crashed after 748 tests passed the gate at 758/759.
+  A job that never selected its tests (a usage error before pytest started) leaves no `collection.json`,
+  so its tests are not even known; the gate is told which jobs were chosen (`--expect P2`) and fails,
+  `JOB_RESULT_MISSING`, when a chosen job has no `collection.json`. It checks each operating system's
+  directory on its own. Without this, a CI run whose P2, P3 and P4 jobs all exited on a usage error passed
+  the gate on P0 and P1 alone, 10 of 1,016 tests.
 
 ### 9.8 Reports (AMB-03, AMB-04)
 JUnit XML and HTML always (`pytest-html`), Allure optional (`allure-pytest`; HTML generation needs Java).

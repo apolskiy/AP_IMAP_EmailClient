@@ -34,7 +34,7 @@ from emi_api import RunId
 from emi_harness.jobs import read_stop
 from emi_harness.keywords import JobKeyword
 from emi_harness.options import add_arguments, cli_values, pass_through, read_dotenv, resolve
-from emi_harness.priorities import LOW_GATE, Job
+from emi_harness.priorities import LOW_GATE, Job, job_name
 from emi_harness.results import job_dir, load_results
 
 EXIT_PASSED, EXIT_FAILED, EXIT_ABORTED, EXIT_USAGE = 0, 1, 2, 4
@@ -54,18 +54,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--test", action="append", default=[], help="test to run; repeatable")
     parser.add_argument("--file", help="file with one test name per line")
     parser.add_argument("--keyword", action="append", default=[], help="keyword or prefix; repeatable")
-    parser.add_argument("--priority", default=str(Job.ALL), type=_job_name, choices=[str(job) for job in Job],
+    parser.add_argument("--priority", default=str(Job.ALL), type=job_name, choices=[str(job) for job in Job],
                         help="job to run: P0, P1, P2, P3, P4, P2-P4, debug or all (any case)")
     parser.add_argument("--allure", action="store_true", help="also write Allure results (and HTML with the CLI)")
     parser.add_argument("--calibrate", action="store_true", help="record durations and suggest time limits")
     parser.add_argument("-n", "--workers", type=int, default=0, help="parallel workers (pytest-xdist)")
     add_arguments(parser.add_argument_group("settings (also EMI_* variables or .env)"))
     return parser
-
-
-def _job_name(value: str) -> str:
-    """A job name in its canonical case (``p3`` -> ``P3``, ``ALL`` -> ``all``); unknown names are kept for argparse."""
-    return next((str(job) for job in Job if str(job).lower() == value.strip().lower()), value)
 
 
 def _upstream_abort(reports: Path, run_id: str, job: Job) -> str:

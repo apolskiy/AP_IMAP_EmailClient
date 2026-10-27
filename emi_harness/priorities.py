@@ -64,6 +64,18 @@ class Job(StrEnum):
 LOW_JOBS = (Job.P2, Job.P3, Job.P4, Job.P2_P4)
 
 
+def job_name(value: str) -> str:
+    """A job name in its canonical case, for command lines that accept any case.
+
+    Args:
+        value: A job name as typed (``p3``, ``P2-p4``, ``ALL``).
+
+    Returns:
+        The job's own name (``P3``, ``P2-P4``, ``all``); an unknown name unchanged, for argparse to reject.
+    """
+    return next((str(job) for job in Job if str(job).lower() == value.strip().lower()), value)
+
+
 def parse_priority(value: str | None) -> str:
     """Validate a declared priority.
 
