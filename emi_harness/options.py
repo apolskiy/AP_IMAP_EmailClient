@@ -20,6 +20,7 @@ from dotenv import dotenv_values
 
 from emi_api import ClientMode, EmiSettings
 from emi_greenmail import GreenmailSettings
+from emi_harness.faults import FAULT_CHOICES, NO_FAULT
 from emi_reader import ImapSettings
 from emi_reader import Security as ImapSecurity
 from emi_reader.settings import GREENMAIL_TEST_PASSWORD
@@ -193,11 +194,13 @@ OPTIONS: tuple[Option, ...] = (
     Option(name="test_timeout", env="EMI_TEST_TIMEOUT", kind="float", default=90.0, minimum=1, maximum=3600,
            help="default seconds per test"),
     Option(name="job_timeout", env="EMI_JOB_TIMEOUT", kind="float", default=0.0, minimum=0, maximum=86400,
-           help="job time budget in seconds (0: P0 300, P1 600, P2-P4 3600, debug 900, all unlimited)"),
+           help="job time budget in seconds (0: P0 300, P1 600, P2/P3/P4/P2-P4 3600, debug 900, all unlimited)"),
     Option(name="run_id", env="EMI_RUN_ID", kind="str", default="",
            help="run ID shared by every job of a run (default: a new one)"),
     Option(name="reports_dir", env="EMI_REPORTS_DIR", kind="str", default="reports", help="report directory"),
     Option(name="log_dir", env="EMI_LOG_DIR", kind="str", default="logs", help="test broker log directory"),
+    Option(name="fault", env="EMI_FAULT", kind="choice", default=NO_FAULT, choices=FAULT_CHOICES,
+           help="named fault for test-validity runs (design §13.4); results are never gate results"),
 )
 OPTIONS_BY_NAME: dict[str, Option] = {option.name: option for option in OPTIONS}
 

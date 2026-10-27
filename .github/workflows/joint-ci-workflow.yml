@@ -1,8 +1,9 @@
 # SPDX-FileCopyrightText: 2026 Aleksandr Polskiy
 # SPDX-License-Identifier: Apache-2.0
-# Main pipeline: decides project status (design §12, docs/ci_jobs.md).
-# lint -> unit (Windows + Ubuntu) -> functional chain per OS (P0 -> P1 -> P2-P4) -> quality-gate.
-name: main
+# joint-ci-workflow, the main pipeline: decides project status (design §12, docs/ci_jobs.md).
+# lint -> unit (Windows + Ubuntu) -> functional chain per OS (P0 -> P1 -> P2 | P3 | P4) -> quality-gate.
+# A manual run chooses which functional jobs run; lint and the unit tests always run first.
+name: joint-ci-workflow
 
 on:
   push:
@@ -27,12 +28,33 @@ on:
       - ".pylintrc"
       - ".github/**"
   workflow_dispatch:
+    inputs:
+      p0:
+        description: Run the P0 job (critical)
+        type: boolean
+        default: true
+      p1:
+        description: Run the P1 job (high)
+        type: boolean
+        default: true
+      p2:
+        description: Run the P2 job (standard)
+        type: boolean
+        default: true
+      p3:
+        description: Run the P3 job (low)
+        type: boolean
+        default: true
+      p4:
+        description: Run the P4 job (lowest)
+        type: boolean
+        default: true
 
 # A pull request or feature-branch push cancels the older run of the same ref. Runs on main and manual
 # runs get a group of their own (the run ID), so they are never cancelled and may run in parallel.
 concurrency:
   group: >-
-    main-${{ (github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main')
+    joint-ci-workflow-${{ (github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main')
     && github.run_id || github.ref }}
   cancel-in-progress: true
 
@@ -85,12 +107,18 @@ jobs:
           path: reports/unit/
           if-no-files-found: warn
 
+  # Pushes and pull requests have no inputs and run every job; a manual run runs the ticked ones.
   functional-ubuntu:
     needs: unit
     uses: ./.github/workflows/functional-chain.yml
     with:
       os: ubuntu-latest
       label: ubuntu
+      run-p0: ${{ github.event_name != 'workflow_dispatch' || inputs.p0 }}
+      run-p1: ${{ github.event_name != 'workflow_dispatch' || inputs.p1 }}
+      run-p2: ${{ github.event_name != 'workflow_dispatch' || inputs.p2 }}
+      run-p3: ${{ github.event_name != 'workflow_dispatch' || inputs.p3 }}
+      run-p4: ${{ github.event_name != 'workflow_dispatch' || inputs.p4 }}
     secrets: inherit
 
   functional-windows:
@@ -99,11 +127,19 @@ jobs:
     with:
       os: windows-latest
       label: windows
+      run-p0: ${{ github.event_name != 'workflow_dispatch' || inputs.p0 }}
+      run-p1: ${{ github.event_name != 'workflow_dispatch' || inputs.p1 }}
+      run-p2: ${{ github.event_name != 'workflow_dispatch' || inputs.p2 }}
+      run-p3: ${{ github.event_name != 'workflow_dispatch' || inputs.p3 }}
+      run-p4: ${{ github.event_name != 'workflow_dispatch' || inputs.p4 }}
     secrets: inherit
 
   quality-gate:
     needs: [unit, functional-ubuntu, functional-windows]
-    if: ${{ !cancelled() && needs.unit.result == 'success' }}
+    if: >-
+      ${{ !cancelled() && needs.unit.result == 'success'
+      && (github.event_name != 'workflow_dispatch' || inputs.p0 || inputs.p1 || inputs.p2 || inputs.p3
+      || inputs.p4) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:

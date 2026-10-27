@@ -40,6 +40,11 @@ class StopDecision:
     secondary: tuple[str, ...]
     message: str
 
+    def __post_init__(self) -> None:
+        """Keywords as plain ``str``: a keyword enum in a test report cannot cross to the xdist controller."""
+        object.__setattr__(self, "primary", str(self.primary))
+        object.__setattr__(self, "secondary", tuple(str(item) for item in self.secondary))
+
     def to_json(self) -> dict[str, object]:
         """As plain JSON.
 
@@ -52,15 +57,19 @@ class StopDecision:
 class JobController:
     """Watches results as they arrive and decides when the job stops."""
 
-    def __init__(self, job: Job, *, budget_sec: float | None = None, stop_dir: Path | None = None) -> None:
+    def __init__(self, job: Job, *, budget_sec: float | None = None, stop_dir: Path | None = None,
+                 breaker: bool | None = None) -> None:
         """Create the controller.
 
         Args:
             job: The running job.
             budget_sec: Job time budget; None for no limit.
             stop_dir: Directory of the shared stop file (pytest-xdist); None keeps the decision local.
+            breaker: Whether the circuit breaker applies; None follows the job. A fault run turns it off,
+                because failures are what it expects (design §13.4).
         """
         self._job = job
+        self._breaker = job.breaker if breaker is None else breaker
         self._budget = budget_sec
         self._stop_dir = stop_dir
         self._decision: StopDecision | None = None
@@ -115,7 +124,7 @@ class JobController:
         if outcome.status is Status.PASSED:
             self._streak_keyword, self._streak = "", 0
             return None
-        if not self._job.breaker:
+        if not self._breaker:
             return None
         if outcome.primary == self._streak_keyword:
             self._streak += 1

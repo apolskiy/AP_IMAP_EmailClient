@@ -57,13 +57,21 @@ runs:
           Invoke-WebRequest "https://repo1.maven.org/maven2/com/icegreen/greenmail-standalone/$env:GREENMAIL_VERSION/greenmail-standalone-$env:GREENMAIL_VERSION.jar" -OutFile $jar
         }
         Write-Output "JAR: $jar ($((Get-Item $jar).Length) bytes)"
-        & java -version
-        $arguments = @("-Dgreenmail.setup.test.all", "-Dgreenmail.hostname=127.0.0.1",
-                       "-Dgreenmail.users=qa:$env:GREENMAIL_PASSWORD@example.com", "-jar", "`"$jar`"")
-        $process = Start-Process java -ArgumentList $arguments -WindowStyle Hidden -PassThru `
-          -RedirectStandardOutput (Join-Path $folder "greenmail.out.log") `
-          -RedirectStandardError (Join-Path $folder "greenmail.err.log")
-        Write-Output "Greenmail started as process $($process.Id)"
+        $java = Join-Path $env:JAVA_HOME "bin\java.exe"
+        & $java -version
+        # Started through WMI, not Start-Process: a child of this step ends with the step on Windows
+        # runners (Greenmail logged its start, then vanished before the readiness step). WMI's process
+        # has no parent here, so it lives until the job ends. It does not inherit this step's
+        # environment, hence the full java path; cmd /c gives it the output files.
+        $out = Join-Path $folder "greenmail.out.log"
+        $err = Join-Path $folder "greenmail.err.log"
+        $command = "cmd.exe /c `"`"$java`" -Dgreenmail.setup.test.all -Dgreenmail.hostname=127.0.0.1 " +
+                   "-Dgreenmail.users=qa:$env:GREENMAIL_PASSWORD@example.com -jar `"$jar`" > `"$out`" 2> `"$err`"`""
+        $created = Invoke-CimMethod -ClassName Win32_Process -MethodName Create `
+          -Arguments @{ CommandLine = $command; CurrentDirectory = $folder }
+        if ($created.ReturnValue -ne 0) { throw "Win32_Process.Create returned $($created.ReturnValue)" }
+        Write-Output "Greenmail started as process $($created.ProcessId) (cmd.exe running java)"
+        "GREENMAIL_PID=$($created.ProcessId)" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
 
     - name: Wait for Greenmail readiness
       shell: bash
@@ -80,7 +88,11 @@ runs:
       shell: pwsh
       run: |
         $folder = Join-Path $env:RUNNER_TEMP "greenmail"
-        Get-Process java -ErrorAction SilentlyContinue | Format-Table Id, StartTime, HasExited -AutoSize
+        Write-Output "started process: $env:GREENMAIL_PID"
+        $running = @(Get-CimInstance Win32_Process -Filter "Name = 'java.exe' OR Name = 'cmd.exe'" |
+          Where-Object { $_.ProcessId -eq [int]$env:GREENMAIL_PID -or $_.ParentProcessId -eq [int]$env:GREENMAIL_PID })
+        if ($running.Count -eq 0) { Write-Output "Greenmail's process is not running" }
+        $running | Format-Table ProcessId, ParentProcessId, Name, CreationDate -AutoSize
         foreach ($name in "greenmail.out.log", "greenmail.err.log") {
           Write-Output "----- $name"
           Get-Content (Join-Path $folder $name) -ErrorAction SilentlyContinue | Select-Object -Last 60

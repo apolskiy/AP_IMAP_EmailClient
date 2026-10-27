@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit tests: the pytest plugin inside a throwaway project, and the harness and gate CLIs (design §9)."""
 
+import json
 from pathlib import Path
 
 import pytest
@@ -21,6 +22,7 @@ _INI = """
 python_files = ["emi_*.py"]
 python_classes = ["TestEMI*"]
 python_functions = ["EMI_*"]
+enable_assertion_pass_hook = true
 """
 _HEADER = """
 import time
@@ -134,6 +136,55 @@ class TestEMIHarnessPlugin:
         assert outcomes["C400063"].primary == CaseKeyword.DEPENDENCY_SKIPPED
         assert outcomes["C400064"].status is Status.PASSED
 
+    def EMI_HARNESS_UNIT_200116_no_verification(self, project: pytest.Pytester) -> None:
+        """A test that checks nothing fails with CASE_NO_VERIFICATION; a verify or a passing assert counts."""
+        _functional(project, """
+    @pytest.mark.emi(priority="P2")
+    def EMI_DEMO_FUNC_400071_checks_nothing(self, steps) -> None:
+        with steps.step("do something"):
+            time.sleep(0)
+
+    @pytest.mark.emi(priority="P2")
+    def EMI_DEMO_FUNC_400072_verifies(self, steps) -> None:
+        with steps.step("check") as step:
+            step.verify("one is one", 1 == 1)
+
+    @pytest.mark.emi(priority="P2")
+    def EMI_DEMO_FUNC_400073_asserts(self) -> None:
+        assert 1 == 1
+""")
+        result, outcomes = _run(project)
+        result.assert_outcomes(passed=2, failed=1)
+        assert outcomes["C400071"].primary == CaseKeyword.NO_VERIFICATION
+        assert outcomes["C400072"].passed and outcomes["C400073"].passed
+
+    def EMI_HARNESS_UNIT_200117_did_not_raise_is_a_failed_check(self, project: pytest.Pytester) -> None:
+        """An unsatisfied pytest.raises is stored as FAILED with CASE_VERIFICATION_FAILED, never as a pass."""
+        _functional(project, """
+    @pytest.mark.emi(priority="P2")
+    def EMI_DEMO_FUNC_400081_expects_an_error(self) -> None:
+        with pytest.raises(ValueError):
+            int("1")
+""")
+        result, outcomes = _run(project)
+        result.assert_outcomes(failed=1)
+        assert outcomes["C400081"].status is Status.FAILED
+        assert outcomes["C400081"].primary == CaseKeyword.VERIFICATION_FAILED
+        assert "DID NOT RAISE" in outcomes["C400081"].message
+
+    def EMI_HARNESS_UNIT_200118_no_verification_needs_the_hook(self, project: pytest.Pytester) -> None:
+        """Without enable_assertion_pass_hook the rule is skipped (asserts cannot be counted); a warning says so."""
+        project.makepyprojecttoml(_INI.replace("enable_assertion_pass_hook = true", ""))
+        _functional(project, """
+    @pytest.mark.emi(priority="P2")
+    def EMI_DEMO_FUNC_400091_asserts(self) -> None:
+        assert 1 == 1
+""")
+        result, outcomes = _run(project)
+        result.assert_outcomes(passed=1)
+        assert outcomes["C400091"].passed
+        result.stdout.fnmatch_lines([f"*{CaseKeyword.NO_VERIFICATION} not checked*"])
+
     def EMI_HARNESS_UNIT_200102_dependency_skip_and_order(self, project: pytest.Pytester) -> None:
         """A child written before its parent runs after it, and is skipped when the parent fails."""
         _functional(project, """
@@ -156,6 +207,7 @@ class TestEMIHarnessPlugin:
     @pytest.mark.emi(priority="P2", timeout=0.01)
     def EMI_DEMO_FUNC_400031_slow(self) -> None:
         time.sleep(0.1)
+        assert True
 """)
         result, outcomes = _run(project)
         result.assert_outcomes(failed=1)
@@ -276,7 +328,7 @@ class TestEMIHarnessCli:
         controller.record(TestOutcome(nodeid="tests/emi_func_demo.py::C400001", case_id="C400001", priority="P0",
                                       status=Status.SKIPPED, primary="GREENMAIL_NOT_READY", infrastructure=True))
         calls: list[list[str]] = []
-        for job in ("P1", "P2-P4"):
+        for job in ("P1", "P2", "P3", "P4", "P2-P4"):
             assert main(["--priority", job], runner=lambda args: calls.append(args) or 1) == EXIT_ABORTED
         assert not calls and "GREENMAIL_NOT_READY" in capsys.readouterr().err
 
@@ -297,11 +349,13 @@ class TestEMIHarnessCli:
         assert len(calls) == 1
 
     @pytest.mark.parametrize(("job", "failed", "expected"), [("P1", 0, EXIT_PASSED), ("P1", 1, EXIT_FAILED),
-                                                             ("P2-P4", 1, EXIT_PASSED), ("P2-P4", 2, EXIT_FAILED)])
+                                                             ("P2-P4", 1, EXIT_PASSED), ("P2-P4", 2, EXIT_FAILED),
+                                                             ("P3", 5, EXIT_PASSED)])
     def EMI_HARNESS_UNIT_200113_job_exit_from_results(self, reports: Path, job: str, failed: int,
                                                       expected: int) -> None:
-        """P1 needs every test passed; P2-P4 needs 85% (9 of 10 holds, 8 of 10 does not)."""
-        priority = "P1" if job == "P1" else "P2"
+        """P1 needs every test passed; P2-P4 needs 85% (9 of 10 holds, 8 of 10 does not); P2, P3 or P4
+        alone leaves the 85% of the three together to the quality gate (AMB-67)."""
+        priority = job if job in ("P1", "P3") else "P2"
 
         def runner(args: list[str]) -> int:
             del args
@@ -322,3 +376,25 @@ class TestEMIHarnessCli:
         writer.write(_outcome("C400302", "P1", Status.FAILED, "P1"))
         assert gate_main([str(tmp_path)]) == 1
         assert "P1 (100%)" in capsys.readouterr().out
+
+    def EMI_HARNESS_UNIT_200125_gate_counts_missing_results(self, tmp_path: Path,
+                                                             capsys: pytest.CaptureFixture[str]) -> None:
+        """A selected test without a result (a crashed worker) counts as not passed: 1 of 2 P2 is under 85%."""
+        writer = ResultsWriter(tmp_path / "P2", "main")
+        writer.write(_outcome("C400401", "P2", Status.PASSED, "P2"))
+        selected = [{"nodeid": f"tests/emi_func_demo.py::{case}", "case_id": case, "priority": "P2"}
+                    for case in ("C400401", "C400402")]
+        (tmp_path / "P2" / "collection.json").write_text(json.dumps({"selected": selected}), encoding="utf-8")
+        assert gate_main([str(tmp_path)]) == 1
+        captured = capsys.readouterr()
+        assert "JOB_RESULT_MISSING: C400402 (P2) was selected by job P2" in captured.err
+        assert "1/2" in captured.out
+
+    def EMI_HARNESS_UNIT_200119_gate_refuses_fault_runs(self, tmp_path: Path,
+                                                         capsys: pytest.CaptureFixture[str]) -> None:
+        """Results produced under a named fault are never gate results (exit 2), even if they all passed."""
+        writer = ResultsWriter(tmp_path / "all", "main")
+        writer.write(TestOutcome(nodeid="tests/emi_func_demo.py::C400301", case_id="C400301", priority="P2",
+                                 status=Status.PASSED, job="all", fault="reader-wrong-link"))
+        assert gate_main([str(tmp_path)]) == 2
+        assert "reader-wrong-link" in capsys.readouterr().err

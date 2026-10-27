@@ -277,11 +277,16 @@ class Steps:  # pylint: disable=too-many-instance-attributes
         raise CaseFailure(verdict.message, verdict.primary, secondary=verdict.secondary,
                           step=current.label) from error
 
+    @property
+    def verification_count(self) -> int:
+        """How many ``verify`` calls the finished steps made (design §13.4)."""
+        return sum(len(record.verifications) for record in self._records)
+
     def _record(self, current: Step, status: Status, primary: str, message: str, duration: float) -> None:
         """Store a step's record and log its end."""
         record = StepRecord(label=current.label, description=current.description, status=status,
                             duration=round(duration, 3), verifications=current.verifications, primary=primary,
-                            message=message)
+                            message=message, limit=current.timeout)
         self._records.append(record)
         if status is not Status.PASSED:
             self._ended = record

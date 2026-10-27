@@ -12,6 +12,8 @@ from emi_reader import EmailWaitError, ReaderCaseKeyword
 from tests.functional.catalog import CTA_OF, KINDS, NEGATIVE_WAIT_SEC, cases
 
 _FORMS = ("case-id", "number", "run", "case-id-and-run")
+FORM_CASES = list(itertools.product(KINDS, _FORMS))
+OTHER_RUN_CASES = [(kind,) for kind in KINDS]
 
 
 def _markers(form: str, run: EmiRun, run_id: str) -> dict[str, str]:
@@ -26,7 +28,7 @@ class TestEMIMarkers:
 
     @pytest.mark.emi(priority="P2")
     @pytest.mark.parametrize(("kind", "form"), cases(
-        403000, list(itertools.product(KINDS, _FORMS)), name=lambda value: f"{value[0]}-{value[1]}"))
+        403000, FORM_CASES, name=lambda value: f"{value[0]}-{value[1]}"))
     def EMI_TOOL_FUNC_403000_markers_match(  # pylint: disable=too-many-arguments
         self, api: EmiApi, steps: Steps, emi_run: EmiRun, kind: str, form: str,
     ) -> None:
@@ -41,7 +43,7 @@ class TestEMIMarkers:
             step.verify("X-EMI-Run-Id is the run", email.email.run_id == api.run_id.lower())
 
     @pytest.mark.emi(priority="P3")
-    @pytest.mark.parametrize("kind", cases(403012, [(kind,) for kind in KINDS], name=lambda value: value[0]))
+    @pytest.mark.parametrize("kind", cases(403012, OTHER_RUN_CASES, name=lambda value: value[0]))
     def EMI_TOOL_FUNC_403012_other_run_marker_not_matched(
         self, api: EmiApi, steps: Steps, emi_run: EmiRun, kind: str,
     ) -> None:

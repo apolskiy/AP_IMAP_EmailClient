@@ -13,7 +13,8 @@ Every ``--emi-*`` option is passed to pytest unchanged. Reports go to ``reports/
 HTML, results, Allure results with ``--allure``).
 
 Exit codes: 0 the job passed; 1 the job failed (P0/P1: any test not passed, a P0 failure also printed as
-JOB_CRITICAL_FUNCTIONAL_FAILURE; P2-P4: under 85% passed; debug/all: pytest's verdict); 2 the job stopped
+JOB_CRITICAL_FUNCTIONAL_FAILURE; P2-P4: under 85% passed; P2, P3, P4 alone: never, since their 85% holds
+for the three together and ``emi_harness.gate`` measures it; debug/all: pytest's verdict); 2 the job stopped
 early (abort: infrastructure, circuit breaker or time budget), or an earlier job of the run aborted;
 4 usage error; 5 no tests selected. A failed test never stops a job: its dependents are skipped instead,
 in this job and in later jobs of the same run (AMB-65).
@@ -37,7 +38,7 @@ from emi_harness.priorities import LOW_GATE, Job
 from emi_harness.results import job_dir, load_results
 
 EXIT_PASSED, EXIT_FAILED, EXIT_ABORTED, EXIT_USAGE = 0, 1, 2, 4
-_UPSTREAM = {Job.P1: (Job.P0,), Job.P2_P4: (Job.P0, Job.P1)}
+_UPSTREAM = {Job.P1: (Job.P0,), **dict.fromkeys((Job.P2, Job.P3, Job.P4, Job.P2_P4), (Job.P0, Job.P1))}
 
 PytestRunner = Callable[[list[str]], int]
 
@@ -54,7 +55,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--file", help="file with one test name per line")
     parser.add_argument("--keyword", action="append", default=[], help="keyword or prefix; repeatable")
     parser.add_argument("--priority", default=str(Job.ALL), choices=[str(job) for job in Job],
-                        help="job to run: P0, P1, P2-P4, debug or all")
+                        help="job to run: P0, P1, P2, P3, P4, P2-P4, debug or all")
     parser.add_argument("--allure", action="store_true", help="also write Allure results (and HTML with the CLI)")
     parser.add_argument("--calibrate", action="store_true", help="record durations and suggest time limits")
     parser.add_argument("-n", "--workers", type=int, default=0, help="parallel workers (pytest-xdist)")
@@ -84,9 +85,14 @@ def _job_exit(directory: Path, job: Job, pytest_code: int) -> int:
               "(the job finished; only their dependents were skipped)", file=sys.stderr)
     if job in (Job.P0, Job.P1):
         return EXIT_PASSED if all(outcome.passed for outcome in results) else EXIT_FAILED
-    if job is Job.P2_P4:
+    if job.low:
         passed = sum(1 for outcome in results if outcome.passed)
-        return EXIT_PASSED if not results or passed / len(results) >= LOW_GATE else EXIT_FAILED
+        if job is Job.P2_P4:
+            return EXIT_PASSED if not results or passed / len(results) >= LOW_GATE else EXIT_FAILED
+        # One of P2, P3, P4: the 85% holds for the three together, so quality-gate decides it (AMB-67).
+        print(f"{job} job: {passed} of {len(results)} passed; P2-P4 together must reach {LOW_GATE:.0%}, "
+              "measured by the quality gate over all three jobs", file=sys.stderr)
+        return EXIT_PASSED
     return pytest_code
 
 

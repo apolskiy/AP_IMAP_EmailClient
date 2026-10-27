@@ -411,7 +411,7 @@ secondary keywords. New test families register through a small plugin registry w
 ### 9.1 CLI (AMB-05, AMB-11)
 `python -m emi_harness.cli` (argparse, generated from the option table):
 `--test <name>`, `--file <list.txt>` (one name per line), `--keyword <KEYWORD or prefix>` (primary or
-secondary), `--priority P0|P1|P2-P4`, `--allure`, `--calibrate`, plus every `--emi-*` option. Without the
+secondary), `--priority P0|P1|P2|P3|P4|P2-P4`, `--allure`, `--calibrate`, plus every `--emi-*` option. Without the
 Allure CLI, `--allure` logs a warning and the run continues with JUnit XML + HTML (AMB-03).
 
 ### 9.2 Step model (AMB-46)
@@ -477,7 +477,10 @@ test SKIP; job stops.
   P0 is never moved; P0 alone above 20% → `JOB_PRIORITY_P0_OVERFLOW`.
 * **Gates** (`quality-gate`): P0 = 100%, P1 = 100%; P2–P4 together ≥ 85% (else fail, nothing else
   measured); (all passed) / (all functional) ≥ 95%. The gate prints both checks, the effective P2–P4
-  floor and a keyword summary table.
+  floor and a keyword summary table. **All functional** means every test a job selected: each job lists
+  its selection in `collection.json`, and a selected test without a result (a crashed worker, a runner
+  killed at its timeout) counts as not passed, `JOB_RESULT_MISSING`. Without this, lost results shrank
+  the measured set: a CI run whose P2-P4 job crashed after 748 tests passed the gate at 758/759.
 
 ### 9.8 Reports (AMB-03, AMB-04)
 JUnit XML and HTML always (`pytest-html`), Allure optional (`allure-pytest`; HTML generation needs Java).
@@ -541,14 +544,21 @@ User-facing details: `docs/ci_jobs.md`. Rule source: `.claude/rules/framework-ru
   `pyproject.toml`, `.pylintrc`, workflows), including the push a merge into `main` creates; every pull
   request into `main` with such changes (push and PR runs both run, AMB-60); docs-only changes do not
   trigger. **Every workflow has `workflow_dispatch`**, so any job can be started by hand.
-* **Main pipeline** (project status):
+* **Joint CI workflow `joint-ci-workflow`** (project status). Started by hand, it takes one tick box per
+  functional job (P0, P1, P2, P3, P4; all ticked by default, AMB-66, AMB-67): `lint` and `unit` always run, then the
+  ticked jobs; a job left out neither runs nor stops later ones, and `quality-gate` measures the results
+  that exist (it does not run when no functional job is ticked). Pushes and pull requests run every job.
   1. `lint` (Ubuntu): pylint 10.00/10.
   2. `unit` (Windows + Ubuntu): every unit-test folder, including the network-fault layers 1 and 2 (§13).
      Mandatory gate.
-  3. `functional-p0` → `functional-p1` → `functional-p2-p4`, a chain **per OS** (Windows and Ubuntu side
-     by side; both must pass). The chain stops only when a job aborts; test failures, P0 included, do
-     not stop it (AMB-65). The three jobs share one run ID (chosen by P0), and P1 and P2–P4 first get
-     the earlier jobs' results, so dependents of a failed parent are skipped in later jobs too.
+  3. `functional-p0` → `functional-p1` → `functional-p2`, `functional-p3`, `functional-p4` (the last three
+     side by side, a matrix, AMB-67), a chain **per OS** (Windows and Ubuntu side by side; both must
+     pass). The chain stops only when a job aborts; test failures, P0 included, do not stop it (AMB-65).
+     The jobs share one run ID (chosen by the chain's first job, `run-id`), and the later jobs first get
+     the P0 and P1 results, so dependents of a failed parent are skipped in later jobs too. A P2, P3 or
+     P4 test's parents are P0 or P1 tests (the three low jobs do not see each other's results). Each low
+     job fails only when it aborts; their 85% together is measured by `quality-gate`. Locally,
+     `--priority P2-P4` still runs the three as one job, which itself needs 85%.
   4. `quality-gate` (Ubuntu): the gates of §9.7 over both OSes' results; builds the Allure report once.
 * **Functional job steps**: checkout → `actions/setup-python` (3.14) → `pip install -r requirements.txt
   -r requirements-dev.txt` → start Greenmail → readiness poll → start `emi_test_broker` → session setup
@@ -557,6 +567,8 @@ User-facing details: `docs/ci_jobs.md`. Rule source: `.claude/rules/framework-ru
   with `docker run`, using the README's options. That way one composite action serves both OSes; a
   `services:` container cannot exist on a Windows job. GitHub's Windows runners cannot run Linux containers, so Windows runs the
   `greenmail-standalone-2.1.15.jar` (cached) on Temurin 17 via `actions/setup-java`, in the background.
+  It is started through WMI (`Win32_Process.Create`), not as a child of the step: on Windows runners a
+  step's children end with the step (the JVM vanished mid-start, seen in CI on 2026-10-27).
   Reason for Windows functional CI: Java is needed anyway (Allure's report generator) and ships with the
   runners, and the behaviour that differs most on Windows (broker detached auto-start, port binding,
   shared log-file locking, real socket errors) cannot be covered by unit-test simulations.
@@ -569,8 +581,8 @@ User-facing details: `docs/ci_jobs.md`. Rule source: `.claude/rules/framework-ru
   manual runs are never cancelled and may run in parallel; a job using a shared real mailbox queues.
 * **Test validity** (§13.4, AMB-64): `test-validity` (manual and weekly, Ubuntu) runs the named-fault
   and stability checks; it never blocks.
-* **Workflow files**: `.github/workflows/main.yml` (pipeline), `functional-chain.yml` (the P0 → P1 →
-  P2–P4 chain, called once per OS), `ci-debug-run.yml`, `unit-standalone.yml` (a `changes` job lists the
+* **Workflow files**: `.github/workflows/joint-ci-workflow.yml` (project status), `functional-chain.yml` (the P0 → P1 →
+  P2 / P3 / P4 chain, called once per OS), `ci-debug-run.yml`, `unit-standalone.yml` (a `changes` job lists the
   tools whose folders changed; each tool's job calls `unit-tool.yml`), `test-validity.yml`. Shared steps
   are composite actions: `.github/actions/harness-job` (Python, requirements, Greenmail, broker, one
   harness command, uploads; its exit code tells the chain an abort from failures) and `start-greenmail`.
@@ -628,13 +640,13 @@ and the keyword they must fail with:
 
 | Fault | What breaks | Must be caught by | Expected keyword |
 |---|---|---|---|
-| `sender-drops-email` | `send` delivers one email fewer than asked; the manifest still lists them all | delivery 400001–400004, counts exceeded, arrival during the wait | `CASE_EMAIL_NOT_RECEIVED`; counts exceeded: `CASE_VERIFICATION_FAILED` (the expected error is not raised) |
+| `sender-drops-email` | `send` and `send_batch` deliver one email fewer than asked; the manifest still lists them all | delivery 400001–400004, counts, counts exceeded, arrival during the wait | `CASE_EMAIL_NOT_RECEIVED`; counts exceeded: `CASE_VERIFICATION_FAILED` (the expected error is not raised) |
 | `sender-ignores-field` | a batch puts the address in `To`, whatever field was asked | counts and batches in `Cc` / `Bcc`; fields not matched (`cc` / `bcc` sent) | `CASE_EMAIL_NOT_RECEIVED`; fields: `CASE_VERIFICATION_FAILED` |
 | `reader-any-field` | a wait matches the address in every recipient field, whatever `match_fields` says | fields not matched | `CASE_VERIFICATION_FAILED` |
 | `reader-ignores-markers` | a wait drops its test and run markers | other run's marker not matched | `CASE_VERIFICATION_FAILED` |
 | `reader-slot-collapse` | a wait for a slot address `<run>-rNN` reads slot 0 instead | batches over 5 or 10 addresses; isolation (own extra slot) | `CASE_EMAIL_NOT_RECEIVED`, `CASE_EMAIL_COUNT_EXCEEDED` or `CASE_VERIFICATION_FAILED` |
 | `reader-duplicates-email` | a wait returns one email twice in place of another (same count) | counts of 2 or more, batches, delivery 400004 | `CASE_VERIFICATION_FAILED` |
-| `reader-returns-extra` | a wait returns one email more than asked | counts, batches | `CASE_VERIFICATION_FAILED` |
+| `reader-returns-extra` | a wait returns one email more than asked | counts, batches (they compare received and sent emails as lists, not sets) | `CASE_VERIFICATION_FAILED` |
 | `reader-wrong-link` | the link returned differs from the email's link in one character | delivery 400001–400004, counts | `CASE_VERIFICATION_FAILED` |
 | `reader-gives-up-early` | a wait gives up after 1 s, whatever its timeout | arrival during the wait (2 s or later) | `CASE_EMAIL_NOT_RECEIVED` |
 
@@ -659,8 +671,10 @@ count: the test states what it checked about the error with `step.verify`. A `py
 satisfied (pytest's `Failed`, "DID NOT RAISE") is a failed check, `CASE_VERIFICATION_FAILED`.
 
 **Guards and outputs.** Results produced under a fault are never gate results: `emi_harness.gate` refuses
-them (exit 2). Reports go to `reports/<run>/validity/` (`faults.json` or `stability.json`, plus each
-underlying job's usual reports). **Where**: locally, and in the non-blocking workflow `test-validity.yml`
+them (exit 2). A fault run turns the circuit breaker off (its failures are the point), and every fault
+leaves the session probe's calls alone, so the setup check cannot skip the run. The catch table lives with
+the suite in `tests/functional/validity.py`. Reports go to `reports/validity/<timestamp>/` (`faults.json`
+or `stability.json`), and each underlying job keeps its usual reports under its own run ID. **Where**: locally, and in the non-blocking workflow `test-validity.yml`
 (manual, with a choice of check, fault and selection; weekly on a schedule; Ubuntu with Greenmail as a
 service container). It never affects project status.
 

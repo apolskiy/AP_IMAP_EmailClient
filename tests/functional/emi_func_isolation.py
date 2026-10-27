@@ -12,6 +12,7 @@ from emi_reader import EmailWaitError, ReaderCaseKeyword
 from tests.functional.catalog import CTA_OF, KINDS, NEGATIVE_WAIT_SEC, cases
 
 _NEIGHBOURS = ("own-extra-slot", "same-case-other-run", "other-case-same-run")
+CASES = list(itertools.product(KINDS, _NEIGHBOURS))
 
 
 def _neighbour(scenario: str, run: EmiRun, run_id: str) -> str:
@@ -29,7 +30,7 @@ class TestEMIIsolation:
 
     @pytest.mark.emi(priority="P3")
     @pytest.mark.parametrize(("kind", "scenario"), cases(
-        406000, list(itertools.product(KINDS, _NEIGHBOURS)), name=lambda value: f"{value[0]}-{value[1]}"))
+        406000, CASES, name=lambda value: f"{value[0]}-{value[1]}"))
     def EMI_TOOL_FUNC_406000_neighbour_mail_ignored(  # pylint: disable=too-many-arguments
         self, api: EmiApi, steps: Steps, emi_run: EmiRun, kind: str, scenario: str,
     ) -> None:

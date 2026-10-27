@@ -39,6 +39,12 @@ class TestEMIHarnessJobs:
             assert controller.record(_outcome(number, Status.FAILED, priority="P0", primary="CASE_X")) is None
         assert controller.stopped() is None
 
+    def EMI_HARNESS_UNIT_200026_breaker_off_for_fault_runs(self) -> None:
+        """With the breaker turned off (a fault run), failures in a row never stop the job."""
+        controller = JobController(Job.ALL, breaker=False)
+        for number in range(BREAKER_LIMIT * 2):
+            assert controller.record(_outcome(400001 + number, Status.FAILED, primary="CASE_A")) is None
+
     def EMI_HARNESS_UNIT_200022_p1_failures_isolated(self) -> None:
         """P1 failures never stop the P1 job (no circuit breaker there)."""
         controller = JobController(Job.P1)
@@ -84,6 +90,13 @@ class TestEMIHarnessPriorities:
         assert (parse_priority("p1"), parse_priority(None)) == ("P1", "P2")
         with pytest.raises(ValueError):
             parse_priority("P5")
+
+    def EMI_HARNESS_UNIT_200027_jobs_and_their_priorities(self) -> None:
+        """P2, P3 and P4 each run one priority with the breaker; P2-P4 runs all three; P0 and P1 have no breaker."""
+        assert [Job(name).priorities for name in ("P2", "P3", "P4")] == [("P2",), ("P3",), ("P4",)]
+        assert Job.P2_P4.priorities == ("P2", "P3", "P4") and Job.P1.priorities == ("P1",)
+        assert all(Job(name).breaker and Job(name).low for name in ("P2", "P3", "P4", "P2-P4"))
+        assert not any(job.breaker or job.low for job in (Job.P0, Job.P1))
 
     def EMI_HARNESS_UNIT_200031_downgrades_excess_p1(self) -> None:
         """Excess P1 tests move to P2: lowest rank first, then the highest test number."""

@@ -4,7 +4,7 @@
 [project]
 name = "ap-imap-emailclient"
 version = "0.1.0"
-description = "IMAP reader library and test harness that waits for application emails and extracts their call-to-action links."
+description = "Email tool (SMTP send, IMAP check), Python library and test harness for end-to-end tests that wait for application emails and extract their call-to-action links."
 readme = "README.md"
 requires-python = ">=3.14"
 license = "Apache-2.0"
@@ -21,3 +21,6 @@ python_classes = ["TestEMI*"]
 python_functions = ["EMI_*"]
 testpaths = ["unittests", "tests"]
 addopts = "-p no:randomly"
+# Design §13.4: the harness counts passing asserts, so a functional test that checks nothing fails
+# with CASE_NO_VERIFICATION.
+enable_assertion_pass_hook = true

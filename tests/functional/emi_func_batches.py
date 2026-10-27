@@ -44,13 +44,13 @@ class Batch:
         return f"{self.preset}-{self.order}-{self.field}-{self.mix}-c{self.concurrency}-s{self.seed}"
 
 
-_BATCHES = [(Batch(*value),) for value in itertools.product(Preset, Order, FIELDS, _MIXES, (1, 4), range(1, 7))]
+BATCHES = [(Batch(*value),) for value in itertools.product(Preset, Order, FIELDS, _MIXES, (1, 4), range(1, 7))]
 
 
 class TestEMIBatches:
     """A batch arrives complete, each email at its planned address."""
 
-    @pytest.mark.parametrize("batch", cases(410000, _BATCHES, name=lambda value: value[0].name,
+    @pytest.mark.parametrize("batch", cases(410000, BATCHES, name=lambda value: value[0].name,
                                             priority=lambda value: _PRIORITY[value[0].preset]))
     def EMI_TOOL_FUNC_410000_batch_arrives_as_planned(self, api: EmiApi, steps: Steps, emi_run: EmiRun,
                                                       batch: Batch) -> None:
@@ -72,5 +72,6 @@ class TestEMIBatches:
             for address, count in sorted(planned.items()):
                 emails = api.reader.wait_for_emails(address, count=count, timeout=step.remaining,
                                                     match_fields=MATCH_FIELDS[batch.field], settle_window=0.0)
-                expected = {entry.message_id for entry in manifest.sent if entry.address == address}
-                step.verify(f"{address}: the planned {count}", {item.message_id for item in emails} == expected)
+                # Lists, not sets: an extra or duplicated email must not collapse into a match.
+                expected = sorted(entry.message_id for entry in manifest.sent if entry.address == address)
+                step.verify(f"{address}: the planned {count}", sorted(item.message_id for item in emails) == expected)

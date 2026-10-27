@@ -10,6 +10,8 @@ from dataclasses import asdict, dataclass, field
 from enum import StrEnum
 from typing import Any
 
+import pytest
+
 from emi_harness.keywords import CaseKeyword
 
 
@@ -78,12 +80,18 @@ class Verdict:
     infrastructure: bool
     message: str
 
+    def __post_init__(self) -> None:
+        """Keywords as plain ``str``: a keyword enum in a test report cannot cross to the xdist controller."""
+        object.__setattr__(self, "primary", str(self.primary))
+        object.__setattr__(self, "secondary", tuple(str(item) for item in self.secondary))
+
 
 def classify(error: BaseException) -> Verdict:
     """Turn any error raised by a test into its verdict.
 
     Typed tool errors keep their keywords; an environment failure (``infrastructure``) becomes a SKIP; a
-    ``CASE_CONDITION_*`` keyword is a SKIP (the test's own parameters are wrong); a plain ``assert`` is
+    ``CASE_CONDITION_*`` keyword is a SKIP (the test's own parameters are wrong); a plain ``assert``, and a
+    ``pytest.raises`` that was not satisfied (pytest's ``Failed``, "DID NOT RAISE"), are
     ``CASE_VERIFICATION_FAILED``; anything else untyped is ``CASE_UNEXPECTED_ERROR``.
 
     Args:
@@ -103,7 +111,7 @@ def classify(error: BaseException) -> Verdict:
         infrastructure = bool(getattr(error, "infrastructure", False))
         skipped = infrastructure or primary.startswith("CASE_CONDITION_")
         return Verdict(Status.SKIPPED if skipped else Status.FAILED, primary, secondary, infrastructure, message)
-    if isinstance(error, AssertionError):
+    if isinstance(error, (AssertionError, pytest.fail.Exception)):
         return Verdict(Status.FAILED, CaseKeyword.VERIFICATION_FAILED, (), False, message)
     return Verdict(Status.FAILED, CaseKeyword.UNEXPECTED_ERROR, (type(error).__name__,), False, message)
 
@@ -120,6 +128,7 @@ class StepRecord:
         verifications: ``(description, passed)`` pairs in order.
         primary: Keyword when it did not pass.
         message: Why it did not pass.
+        limit: The step's time limit in seconds (0 when unknown).
     """
 
     label: str
@@ -129,6 +138,7 @@ class StepRecord:
     verifications: tuple[tuple[str, bool], ...] = ()
     primary: str = ""
     message: str = ""
+    limit: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -149,6 +159,8 @@ class TestOutcome:  # pylint: disable=too-many-instance-attributes
         job: The job that ran it.
         steps: Every step's record.
         attachments: Evidence files, relative to the job's report directory.
+        limit: The test's time limit in seconds (0 when unknown).
+        fault: The named fault the run used (design §13.4), or "" for a real run.
     """
 
     __test__ = False
@@ -166,6 +178,8 @@ class TestOutcome:  # pylint: disable=too-many-instance-attributes
     job: str = ""
     steps: tuple[StepRecord, ...] = field(default_factory=tuple)
     attachments: tuple[str, ...] = ()
+    limit: float = 0.0
+    fault: str = ""
 
     @property
     def passed(self) -> bool:
@@ -197,11 +211,13 @@ class TestOutcome:  # pylint: disable=too-many-instance-attributes
                                  duration=float(item["duration"]),
                                  verifications=tuple((str(name), bool(passed))
                                                      for name, passed in item["verifications"]),
-                                 primary=item.get("primary", ""), message=item.get("message", ""))
+                                 primary=item.get("primary", ""), message=item.get("message", ""),
+                                 limit=float(item.get("limit", 0.0)))
                       for item in data.get("steps", []))
         return cls(nodeid=data["nodeid"], case_id=data.get("case_id", ""), priority=data.get("priority", "P2"),
                    status=Status(data["status"]), primary=data.get("primary", ""),
                    secondary=tuple(data.get("secondary", ())), step=data.get("step", ""),
                    message=data.get("message", ""), duration=float(data.get("duration", 0.0)),
                    infrastructure=bool(data.get("infrastructure", False)), job=data.get("job", ""), steps=steps,
-                   attachments=tuple(str(path) for path in data.get("attachments", ())))
+                   attachments=tuple(str(path) for path in data.get("attachments", ())),
+                   limit=float(data.get("limit", 0.0)), fault=str(data.get("fault", "")))

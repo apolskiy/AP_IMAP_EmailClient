@@ -22,9 +22,10 @@ from typing import Any
 
 import pytest
 
-from emi_api import EmiApi, EmiRun, RunId, worker_number
+from emi_api import EmiApi, EmiRun, RunId, default_backend, worker_number
 from emi_harness.dependencies import DependencyTracker, dependency_groups, order_tests
 from emi_harness.evidence import Attacher, Evidence, write_settings
+from emi_harness.faults import NO_FAULT, apply_fault
 from emi_harness.jobs import JobController, StopDecision
 from emi_harness.keywords import CaseKeyword, HarnessKeyword
 from emi_harness.options import Resolved, add_pytest_options, cli_values, read_dotenv, resolve
@@ -35,8 +36,8 @@ from emi_harness.selection import Candidate, case_id_for, duplicate_ids, read_te
 from emi_harness.session import session_setup
 from emi_harness.steps import StepHook, Steps
 
-_JOB_BUDGETS: dict[Job, float | None] = {Job.P0: 300.0, Job.P1: 600.0, Job.P2_P4: 3600.0, Job.DEBUG: 900.0,
-                                          Job.ALL: None}
+_JOB_BUDGETS: dict[Job, float | None] = {Job.P0: 300.0, Job.P1: 600.0, Job.P2: 3600.0, Job.P3: 3600.0,
+                                          Job.P4: 3600.0, Job.P2_P4: 3600.0, Job.DEBUG: 900.0, Job.ALL: None}
 _COLLECTION_FILE = "collection.json"
 
 
@@ -53,6 +54,7 @@ class ItemInfo:  # pylint: disable=too-many-instance-attributes
     steps: Steps | None = None
     cleanup_keywords: tuple[str, ...] = ()
     evidence: Evidence = field(default_factory=Evidence)
+    asserts: int = 0
 
 
 @dataclass
@@ -71,6 +73,7 @@ class HarnessState:  # pylint: disable=too-many-instance-attributes
     hook: StepHook | None = None
     attacher: Attacher | None = None
     current: ItemInfo | None = None
+    counts_asserts: bool = False
 
 
 _STATE = pytest.StashKey[HarnessState]()
@@ -88,7 +91,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     group = parser.getgroup("emi", "EMI harness")
     add_pytest_options(group.addoption)
     group.addoption("--emi-job", dest="emi_job", default=None, choices=[str(job) for job in Job],
-                    help="job to run: P0, P1, P2-P4, debug or all (default all)")
+                    help="job to run: P0, P1, P2, P3, P4, P2-P4, debug or all (default all)")
     group.addoption("--emi-test", dest="emi_test", action="append", default=[],
                     help="run this test (function name, case ID or node ID); repeatable")
     group.addoption("--emi-test-file", dest="emi_test_file", default=None,
@@ -124,9 +127,12 @@ def pytest_configure(config: pytest.Config) -> None:
     budget = resolved["job_timeout"] if resolved and resolved["job_timeout"] > 0 else _JOB_BUDGETS[job]
     worker = os.environ.get("PYTEST_XDIST_WORKER", "main")
     hook, attacher = _allure(config)
+    fault_run = bool(resolved) and resolved["fault"] != NO_FAULT
     state = HarnessState(resolved=resolved, error=error, job=job, run_id=run_id, directory=directory,
-                         controller=JobController(job, budget_sec=budget, stop_dir=directory),
-                         writer=ResultsWriter(directory, worker), hook=hook, attacher=attacher)
+                         controller=JobController(job, budget_sec=budget, stop_dir=directory,
+                                                  breaker=False if fault_run else None),
+                         writer=ResultsWriter(directory, worker), hook=hook, attacher=attacher,
+                         counts_asserts=bool(config.getini("enable_assertion_pass_hook")))
     config.stash[_STATE] = state
 
 
@@ -208,8 +214,12 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
                                                 if outcome.job != str(state.job)])
     if functional and state.resolved is not None:
         write_settings(state.directory, state.resolved.describe())
-        (state.directory / _COLLECTION_FILE).write_text(json.dumps({"priorities": message, "unmatched": unmatched},
-                                                                   indent=2), encoding="utf-8")
+        # The selected tests, so the gate counts a test without a result (lost to a crash) as not passed.
+        selected = [{"nodeid": item.nodeid, "case_id": cases[item.nodeid], "priority": plan.priorities[item.nodeid]}
+                    for item in items if _ITEM in item.stash]
+        (state.directory / _COLLECTION_FILE).write_text(json.dumps({"priorities": message, "unmatched": unmatched,
+                                                                    "selected": selected}, indent=2),
+                                                        encoding="utf-8")
 
 
 def _group_dependents(items: list[pytest.Item], cases: dict[str, str], depends: dict[str, tuple[str, ...]]) -> None:
@@ -275,7 +285,9 @@ def _api(pytestconfig: pytest.Config) -> Iterator[EmiApi]:
     state = pytestconfig.stash[_STATE]
     if state.resolved is None:
         raise pytest.UsageError(f"invalid EMI option: {state.error}")
-    api = EmiApi(state.resolved.emi_settings(), run_id=state.run_id)
+    settings = state.resolved.emi_settings()
+    backend = apply_fault(state.resolved["fault"], default_backend(settings))  # unchanged unless --emi-fault
+    api = EmiApi(settings, run_id=state.run_id, backend=backend)
     api.observe(lambda name, data: state.current.evidence.add(name, data) if state.current else None)
     try:
         session_setup(api, probe=state.resolved["probe"], probe_timeout=state.resolved["probe_timeout"])
@@ -351,7 +363,14 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) ->
     if call.excinfo is not None and call.when in ("setup", "call") and info.verdict is None:
         _apply_error(item, report, info, call.excinfo.value)
     elif call.when == "call" and report.passed:
-        _apply_time_limit(report, info, state, call.duration)
+        if state.counts_asserts:
+            _apply_no_verification(report, info)
+        if info.verdict is None:
+            _apply_time_limit(report, info, state, call.duration)
+    if report.failed and call.when in ("setup", "call") and info.verdict is None:
+        # A failure the harness could not classify must never be stored as a pass.
+        info.verdict = Verdict(Status.FAILED, CaseKeyword.UNEXPECTED_ERROR, (report.outcome,), False,
+                               str(report.longrepr)[:500])
     if call.when == "call" or (call.when == "setup" and not report.passed):
         report.sections.extend(info.evidence.sections())
     if call.when == "teardown":
@@ -365,7 +384,7 @@ def _apply_error(item: pytest.Item, report: pytest.TestReport, info: ItemInfo, e
     if isinstance(error, pytest.skip.Exception):
         info.verdict = Verdict(Status.SKIPPED, "", (), False, str(error))
         return
-    if not isinstance(error, Exception):
+    if not isinstance(error, (Exception, pytest.fail.Exception)):
         return
     verdict = classify(error)
     info.verdict = verdict
@@ -381,9 +400,25 @@ def _apply_error(item: pytest.Item, report: pytest.TestReport, info: ItemInfo, e
         report.sections.append(("EMI outcome", detail))
 
 
+def _apply_no_verification(report: pytest.TestReport, info: ItemInfo) -> None:
+    """Fail a passing test that checked nothing: no ``step.verify`` and no passing ``assert`` (design §13.4)."""
+    verified = (info.steps.verification_count if info.steps else 0) + info.asserts
+    if verified:
+        return
+    message = "the test passed without a single step.verify or assert; it checks nothing"
+    info.verdict = Verdict(Status.FAILED, CaseKeyword.NO_VERIFICATION, (), False, message)
+    report.outcome = "failed"
+    report.longrepr = f"[{CaseKeyword.NO_VERIFICATION}] {message}"
+
+
+def _test_limit(info: ItemInfo, state: HarnessState) -> float:
+    """The test's time limit: its marker's, else the setting."""
+    return float(info.timeout) if info.timeout else (state.resolved["test_timeout"] if state.resolved else 90.0)
+
+
 def _apply_time_limit(report: pytest.TestReport, info: ItemInfo, state: HarnessState, duration: float) -> None:
     """Fail a passing test that exceeded its own time limit."""
-    limit = float(info.timeout) if info.timeout else (state.resolved["test_timeout"] if state.resolved else 90.0)
+    limit = _test_limit(info, state)
     if duration > limit:
         message = f"test took {duration:.1f} s; the limit is {limit:.1f} s"
         info.verdict = Verdict(Status.FAILED, CaseKeyword.TIMEOUT, (), False, message)
@@ -403,12 +438,33 @@ def _finish(item: pytest.Item, info: ItemInfo, state: HarnessState) -> TestOutco
                           duration=round(time.monotonic() - info.started, 3) if info.started else 0.0,
                           infrastructure=verdict.infrastructure if verdict else False, job=str(state.job),
                           steps=info.steps.records if info.steps else (),
-                          attachments=info.evidence.write(state.directory, info.case_id or item.nodeid))
+                          attachments=info.evidence.write(state.directory, info.case_id or item.nodeid),
+                          limit=_test_limit(info, state), fault=_fault(state))
     state.writer.write(outcome)
     state.controller.record(outcome)
     if state.tracker is not None:
         state.tracker.record(outcome)
     return outcome
+
+
+def _fault(state: HarnessState) -> str:
+    """The run's named fault, or "" for a real run."""
+    name = state.resolved["fault"] if state.resolved else NO_FAULT
+    return "" if name == NO_FAULT else str(name)
+
+
+def pytest_assertion_pass(item: pytest.Item, lineno: int, orig: str, expl: str) -> None:
+    """Count every passing plain ``assert`` of a functional test (``enable_assertion_pass_hook``).
+
+    Args:
+        item: The test.
+        lineno: Line of the assert.
+        orig: Its source text.
+        expl: pytest's explanation.
+    """
+    del lineno, orig, expl
+    if _ITEM in item.stash:
+        item.stash[_ITEM].asserts += 1
 
 
 def _properties(outcome: TestOutcome) -> list[tuple[str, object]]:
@@ -436,6 +492,12 @@ def pytest_terminal_summary(terminalreporter: Any, config: pytest.Config) -> Non
     if not results:
         return
     terminalreporter.section(f"EMI job {state.job} ({state.directory})")
+    if not state.counts_asserts:
+        terminalreporter.write_line(f"warning: {CaseKeyword.NO_VERIFICATION} not checked: set "
+                                    "enable_assertion_pass_hook = true in the pytest configuration")
+    if _fault(state):
+        terminalreporter.write_line(f"FAULT RUN ({_fault(state)}): these results prove tests can fail; "
+                                    "they are never gate results")
     collection = _read_json(state.directory / _COLLECTION_FILE)
     if collection.get("priorities"):
         terminalreporter.write_line(str(collection["priorities"]))

@@ -122,3 +122,4 @@ remaining tests skipped. **info**: secondary keyword only; it never decides the 
 | `JOB_PRIORITY_DOWNGRADED` | A P1 test moved to P2 for this run (P0 + P1 over 20%) | info |
 | `JOB_PRIORITY_P0_OVERFLOW` | P0 alone over 20% of tests | collection fails |
 | `JOB_TIMEOUT` | The job exceeded its time budget | abort; remaining tests skipped |
+| `JOB_RESULT_MISSING` | A job selected a test but wrote no result for it (a crashed worker, a runner killed at its timeout) | the quality gate counts the test as not passed (skip), so lost results cannot raise the pass share |

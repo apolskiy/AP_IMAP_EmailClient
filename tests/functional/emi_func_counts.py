@@ -12,8 +12,8 @@ from emi_reader import EmailWaitError, ReaderCaseKeyword
 from emi_sender import BatchRequest, Field
 from tests.functional.catalog import CTA_OF, FIELDS, KINDS, MATCH_FIELDS, cases
 
-_COUNTS = list(itertools.product(KINDS, FIELDS, range(1, 11)))
-_EXCEEDED = list(itertools.product(KINDS, range(1, 4)))
+COUNTS = list(itertools.product(KINDS, FIELDS, range(1, 11)))
+EXCEEDED = list(itertools.product(KINDS, range(1, 4)))
 
 
 class TestEMICounts:
@@ -21,7 +21,7 @@ class TestEMICounts:
 
     @pytest.mark.emi(priority="P2")
     @pytest.mark.parametrize(("kind", "field", "count"), cases(
-        401000, _COUNTS, name=lambda value: f"{value[0]}-{value[1]}-{value[2]}",
+        401000, COUNTS, name=lambda value: f"{value[0]}-{value[1]}-{value[2]}",
         priority=lambda value: "P1" if value[2] == 1 else None))
     def EMI_TOOL_FUNC_401000_counts_per_kind_and_field(  # pylint: disable=too-many-arguments
         self, api: EmiApi, steps: Steps, emi_run: EmiRun, kind: str, field: str, count: int,
@@ -36,10 +36,12 @@ class TestEMICounts:
             emails = api.reader.wait_for_emails(emi_run.address(), CTA_OF[kind], count=count,
                                                 timeout=step.remaining, match_fields=MATCH_FIELDS[field],
                                                 settle_window=0.0)
+            # Lists, not sets: an extra or duplicated email must not collapse into a match.
+            step.verify(f"exactly {count} received", len(emails) == count)
             step.verify("the received emails are the sent ones",
-                        {item.message_id for item in emails} == {entry.message_id for entry in manifest.sent})
+                        sorted(item.message_id for item in emails) == sorted(entry.message_id for entry in manifest.sent))
             step.verify("each link is the one sent with it",
-                        {item.link for item in emails} == {entry.link for entry in manifest.sent})
+                        sorted(str(item.link) for item in emails) == sorted(str(entry.link) for entry in manifest.sent))
 
 
 class TestEMICountExceeded:
@@ -47,7 +49,7 @@ class TestEMICountExceeded:
 
     @pytest.mark.emi(priority="P3")
     @pytest.mark.parametrize(("kind", "expected"), cases(
-        401500, _EXCEEDED, name=lambda value: f"{value[0]}-expect-{value[1]}"))
+        401500, EXCEEDED, name=lambda value: f"{value[0]}-expect-{value[1]}"))
     def EMI_TOOL_FUNC_401500_count_exceeded(  # pylint: disable=too-many-arguments
         self, api: EmiApi, steps: Steps, emi_run: EmiRun, kind: str, expected: int,
     ) -> None:

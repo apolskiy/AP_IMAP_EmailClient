@@ -164,3 +164,9 @@ class TestEMIHarnessClassify:
     def EMI_HARNESS_UNIT_200017_unexpected_error_names_its_class(self) -> None:
         """The class of an untyped error becomes the secondary keyword."""
         assert classify(ZeroDivisionError("boom")).secondary == ("ZeroDivisionError",)
+
+    @pytest.mark.parametrize("error", [AssertionError("x"), KeyError("x"), CaseSkip("x", CaseKeyword.TIMEOUT)])
+    def EMI_HARNESS_UNIT_200018_keywords_are_plain_strings(self, error: Exception) -> None:
+        """Keywords are exactly ``str``, never a keyword enum: xdist cannot send an enum in a test report."""
+        verdict = classify(error)
+        assert set(map(type, (verdict.primary, *verdict.secondary))) == {str}  # isinstance would accept an enum

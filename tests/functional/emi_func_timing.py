@@ -13,6 +13,7 @@ from emi_sender import Manifest
 from tests.functional.catalog import CTA_OF, KINDS, cases
 
 _DELAYS = (0.5, 1.0, 2.0, 3.0, 5.0)
+CASES = list(itertools.product(KINDS, _DELAYS))
 
 
 class TestEMIArrivalDuringWait:
@@ -20,7 +21,7 @@ class TestEMIArrivalDuringWait:
 
     @pytest.mark.emi(priority="P2")
     @pytest.mark.parametrize(("kind", "delay"), cases(
-        404000, list(itertools.product(KINDS, _DELAYS)), name=lambda value: f"{value[0]}-after-{value[1]:g}s"))
+        404000, CASES, name=lambda value: f"{value[0]}-after-{value[1]:g}s"))
     def EMI_TOOL_FUNC_404000_arrives_mid_wait(  # pylint: disable=too-many-arguments
         self, api: EmiApi, steps: Steps, emi_run: EmiRun, kind: str, delay: float,
     ) -> None:

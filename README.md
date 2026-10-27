@@ -174,7 +174,7 @@ server; the functional tests need Greenmail from step 3 running.
 pylint --rcfile=.pylintrc emi_reader emi_sender emi_test_broker emi_greenmail emi_api emi_harness tests unittests conftest.py
 python -m pytest unittests                       # all unit tests
 python -m emi_harness.cli                        # every functional test (job "all")
-python -m emi_harness.cli --priority P0         # one job: P0, P1, P2-P4, debug or all
+python -m emi_harness.cli --priority P0         # one job: P0, P1, P2, P3, P4, P2-P4, debug or all
 python -m emi_harness.cli --test C400001        # one test: case ID, function name or node ID; repeatable
 python -m emi_harness.cli --file smoke.txt      # one test name per line
 python -m emi_harness.cli --keyword READER_     # tests tied to a keyword or a keyword prefix
@@ -296,7 +296,7 @@ user `qa` with the public password `password`, so nothing needs configuring. To 
   retries did not fix) stops any job. In P2–P4 and debug runs, 5 failures in a row with the same
   keyword stop the job (`JOB_CIRCUIT_BREAKER_OPEN`). Other test failures never stop a job.
 * **Order:** if pylint or the unit tests fail, nothing else runs. Functional jobs run P0 → P1 →
-  P2–P4; if the P0 or P1 job aborts, the lower-priority jobs do not run.
+  P2, P3 and P4 side by side; if the P0 or P1 job aborts, the lower-priority jobs do not run.
 * **Inside a test:** a failing step fails the test, the remaining steps are skipped, and cleanup always runs.
 
 ## CI Jobs and How to Run Them
@@ -305,21 +305,26 @@ CI runs on every push and every pull request into `main` that changes tests, the
 tools, including the push a merge into `main` creates. Every CI job can also be started by hand
 from GitHub (*Actions → Run workflow*). Full details, with local commands for every job: [docs/ci_jobs.md](docs/ci_jobs.md).
 
-**Main pipeline (decides project status), in order:**
+**Joint CI workflow `joint-ci-workflow` (decides project status), in order:**
 
 1. `lint`: pylint must score 10.00/10.
 2. `unit`: the unit tests of every tool, the harness and the central API, on Windows and Ubuntu.
    If any fail, no functional tests run.
-3. `functional-p0` → `functional-p1` → `functional-p2-p4`, one after another: each starts
-   Greenmail and the EMI test broker, then runs its tests. If a job aborts (environment failure,
-   circuit breaker, time budget), the ones after it do not run; test failures alone never stop the chain.
+3. `functional-p0` → `functional-p1` → `functional-p2`, `functional-p3` and `functional-p4` (the last
+   three side by side): each starts Greenmail and the EMI test broker, then runs its tests. If a job
+   aborts (environment failure, circuit breaker, time budget), the ones after it do not run; test
+   failures alone never stop the chain. The P2, P3 and P4 jobs fail only when they abort: their 85% is
+   measured over the three together, by `quality-gate`.
 4. `quality-gate`: P0 and P1 must pass 100% (a skip is not a pass), P2–P4 together at least 85%,
    and all functional tests together at least 95%.
+
+Started by hand, `joint-ci-workflow` offers a tick box per functional job (P0, P1, P2, P3, P4); `lint` and
+`unit` always run first, then only the ticked jobs.
 
 **Operating systems:** unit and functional tests run on both **Windows and Ubuntu**, side by side,
 and both must pass. Ubuntu runs Greenmail in Docker; GitHub's Windows machines cannot run that image,
 so there Greenmail runs as a Java program (the same JAR as in the Windows setup above, on the Java the
-runners already provide). Windows gets real functional runs because the test broker's background
+runners already provide, started through WMI so that it outlives the step that starts it). Windows gets real functional runs because the test broker's background
 process, port handling, log-file sharing and socket errors behave differently there.
 
 **Probe email:** before the first test, each functional run sends a probe email of each type and
@@ -334,11 +339,11 @@ tests change.
 **Overlapping runs:** a new run on a pull request or feature branch cancels the older one for that
 branch. Runs on `main` and manual runs are never cancelled and can run side by side.
 
-**Locally** (the CI workflows themselves are not built yet; these commands are):
+**Locally:**
 
 ```bash
 python -m pytest unittests                       # unit gate
-python -m emi_harness.cli --priority P0         # one priority slice (P0, P1, P2-P4)
+python -m emi_harness.cli --priority P0         # one job (P0, P1, P2, P3, P4, or P2-P4 as one)
 python -m emi_harness.cli --test <name>         # one test; also --file <list.txt>, --keyword <KEYWORD>
 ```
 
@@ -353,7 +358,7 @@ says how much of it is built.
 | [docs/design/email_client_harness_design.md](docs/design/email_client_harness_design.md) | **Design document (Phase 2)**, each section citing the register rows it implements (see the next table). |
 | [docs/rtm.md](docs/rtm.md) | **Requirements traceability matrix.** Each requirement → design section → code → unit test IDs → status (Done / Partial with the gap named / Planned). |
 | [docs/keywords.md](docs/keywords.md) | **Failure keyword catalog.** Keyword grammar; every `READER_`, `SENDER_`, `TEST_BROKER_`, `GREENMAIL_`, `API_`, `HARNESS_`, `CASE_` and `JOB_` keyword with its meaning, outcome (fail / skip / skip + stop / info) and the first thing to check. A unit test fails if code uses a keyword missing here. |
-| [docs/ci_jobs.md](docs/ci_jobs.md) | **CI jobs.** When CI runs, overlapping runs, the main pipeline (lint, unit, P0 → P1 → P2-P4, quality gate), the standalone jobs, and the local command for each job. |
+| [docs/ci_jobs.md](docs/ci_jobs.md) | **CI jobs.** When CI runs, overlapping runs, the joint CI workflow (lint, unit, P0 → P1 → P2 / P3 / P4, quality gate), the standalone jobs, and the local command for each job. |
 | [CLAUDE_LOG.md](CLAUDE_LOG.md) | **Decision and quality log.** What was built in each phase and step, key architectural decisions with their register rows, and pylint scores over time. |
 | [CLAUDE.md](CLAUDE.md), [.claude/rules/](.claude/rules) | **Working rules** the AI collaborator followed: no AI commits, design before code, pylint 10.00/10, naming, test IDs, shell rules. |
 
@@ -393,7 +398,7 @@ AP_IMAP_EmailClient/
 │       ├── testing-standards.md       # Test naming, TestRail IDs, ASCII-only identifiers
 │       └── worktree-rules.md          # No AI commits, secrets protection, IDE ignores
 ├── .github/
-│   ├── workflows/             # CI: main pipeline, functional chain per OS, standalone unit jobs, debug run
+│   ├── workflows/             # CI: joint CI workflow, functional chain per OS, standalone unit jobs, debug run
 │   └── actions/               # Shared CI steps: start Greenmail, run one harness job
 ├── docs/
 │   ├── ci_jobs.md             # CI jobs and how to run them

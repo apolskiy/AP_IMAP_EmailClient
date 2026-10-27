@@ -17,6 +17,7 @@ from tests.functional.catalog import CTA_OF, KINDS, MATCH_FIELDS, NEGATIVE_WAIT_
 
 # (field the address is sent in, field the wait looks in)
 _MISMATCHES = (("cc", "to"), ("bcc", "to"), ("to", "cc"))
+CASES = [(kind, *pair) for kind, pair in itertools.product(KINDS, _MISMATCHES)]
 
 
 class TestEMIFieldsNotMatched:
@@ -24,8 +25,7 @@ class TestEMIFieldsNotMatched:
 
     @pytest.mark.emi(priority="P2")
     @pytest.mark.parametrize(("kind", "sent_in", "waited_in"), cases(
-        402000, [(kind, *pair) for kind, pair in itertools.product(KINDS, _MISMATCHES)],
-        name=lambda value: f"{value[0]}-{value[1]}-not-{value[2]}"))
+        402000, CASES, name=lambda value: f"{value[0]}-{value[1]}-not-{value[2]}"))
     def EMI_TOOL_FUNC_402000_wrong_field_not_matched(  # pylint: disable=too-many-arguments
         self, api: EmiApi, steps: Steps, emi_run: EmiRun, kind: str, sent_in: str, waited_in: str,
     ) -> None:

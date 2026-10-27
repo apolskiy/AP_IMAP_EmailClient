@@ -208,6 +208,36 @@ class TestEMIApiService:
         assert not health.ready and health.keywords[0] == TestBrokerKeyword.UNAVAILABLE
         assert health.problems[0].component == "broker"
 
+    def EMI_API_UNIT_300054_wrapped_client_keeps_service_mode(
+            self, served: tuple[BrokerSettings, BrokerService, SimMailboxes]) -> None:
+        """A wrapper exposing ``inner`` (a named fault) still gets the broker's health and run lease."""
+        settings, service, _mailboxes = served
+        wrapper = SimWrapper(BrokerClient(settings, spawner=lambda _settings: None))
+        api = EmiApi(EmiSettings(broker=settings), run_id=_RUN, backend=wrapper,  # type: ignore[arg-type]
+                     greenmail=SimGreenmailReadiness())  # type: ignore[arg-type]
+        assert api.health().ready
+        api.start_run("400001")
+        assert service.health()["active_runs"] == [_RUN]
+        api.close()
+        assert service.health()["active_runs"] == []
+
+
+class SimWrapper:
+    """A backend wrapper as the harness's named faults build it: ``inner`` plus pass-through."""
+
+    def __init__(self, inner: BrokerClient) -> None:
+        """Wrap a client."""
+        self._inner = inner
+
+    @property
+    def inner(self) -> BrokerClient:
+        """The wrapped client."""
+        return self._inner
+
+    def __getattr__(self, name: str) -> Any:
+        """Every call reaches the wrapped client."""
+        return getattr(self._inner, name)
+
 
 class TestEMIApiFamilies:
     """New test families plug in without core changes."""

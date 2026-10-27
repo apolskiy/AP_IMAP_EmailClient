@@ -8,6 +8,7 @@
   ``JOB_PRIORITY_P0_OVERFLOW``.
 * Gates: P0 = 100%, P1 = 100%; P2-P4 together >= 85% (otherwise nothing else is measured); all passed /
   all functional >= 95%. A skip is never a pass.
+* Jobs: P0, P1, then P2, P3 and P4 (in CI side by side, AMB-67), or P2-P4 as one job (locally).
 """
 
 import math
@@ -33,6 +34,9 @@ class Job(StrEnum):
 
     P0 = "P0"
     P1 = "P1"
+    P2 = "P2"
+    P3 = "P3"
+    P4 = "P4"
     P2_P4 = "P2-P4"
     DEBUG = "debug"
     ALL = "all"
@@ -40,18 +44,24 @@ class Job(StrEnum):
     @property
     def priorities(self) -> tuple[str, ...]:
         """Priorities the job runs."""
-        if self is Job.P0:
-            return ("P0",)
-        if self is Job.P1:
-            return ("P1",)
+        if self in (Job.P0, Job.P1, Job.P2, Job.P3, Job.P4):
+            return (str(self),)
         if self is Job.P2_P4:
             return ("P2", "P3", "P4")
         return PRIORITIES
 
     @property
+    def low(self) -> bool:
+        """A job of standard / low tests (P2, P3, P4, or the three together)."""
+        return self in LOW_JOBS
+
+    @property
     def breaker(self) -> bool:
-        """Whether the circuit breaker applies (P2-P4 and debug runs)."""
-        return self in (Job.P2_P4, Job.DEBUG, Job.ALL)
+        """Whether the circuit breaker applies (the low jobs and debug runs)."""
+        return self.low or self in (Job.DEBUG, Job.ALL)
+
+
+LOW_JOBS = (Job.P2, Job.P3, Job.P4, Job.P2_P4)
 
 
 def parse_priority(value: str | None) -> str:

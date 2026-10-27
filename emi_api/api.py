@@ -284,7 +284,7 @@ class EmiApi:  # pylint: disable=too-many-instance-attributes
         """
         self._settings = settings or EmiSettings.from_env(environ)
         self._run_id = run_id or _run_id_from(environ)
-        self._backend = backend or _default_backend(self._settings)
+        self._backend = backend or default_backend(self._settings)
         self._greenmail = greenmail or GreenmailClient(self._settings.greenmail_settings)
         self._lease_interval = lease_interval_sec
         self._lease: ExitStack | None = None
@@ -408,23 +408,37 @@ class EmiApi:  # pylint: disable=too-many-instance-attributes
 
     def _broker_health(self) -> dict[str, Any]:
         """Health of the backend (starts the broker once in service mode)."""
-        if isinstance(self._backend, BrokerClient):
-            return self._backend.ensure_running(auto_start=self._settings.auto_start)
+        client = _broker_client(self._backend)
+        if client is not None:
+            return client.ensure_running(auto_start=self._settings.auto_start)
         health = getattr(self._backend, "health", None)
         return dict(health()) if callable(health) else {}
 
     def _ensure_lease(self) -> None:
         """Register this worker's run with the broker once (service mode only)."""
-        if not isinstance(self._backend, BrokerClient):
+        client = _broker_client(self._backend)
+        if client is None:
             return
         with self._lock:
             if self._lease is not None:
                 return
-            self._backend.ensure_running(auto_start=self._settings.auto_start)
+            client.ensure_running(auto_start=self._settings.auto_start)
             stack = ExitStack()
-            stack.enter_context(LeaseKeeper(self._backend, self._run_id, holder_name(str(self.mode)),
-                                            self._lease_interval))
+            stack.enter_context(LeaseKeeper(client, self._run_id, holder_name(str(self.mode)), self._lease_interval))
             self._lease = stack
+
+
+def _broker_client(backend: Any) -> BrokerClient | None:
+    """The test broker's client behind the backend, looking through wrappers that expose ``inner``.
+
+    A wrapper (the harness's named faults) changes mail calls only; the broker's start, health and run
+    lease still go to the client it wraps.
+    """
+    while not isinstance(backend, BrokerClient):
+        backend = getattr(backend, "inner", None)
+        if backend is None:
+            return None
+    return backend
 
 
 def _run_id_from(environ: Mapping[str, str] | None) -> str:
@@ -436,8 +450,18 @@ def _run_id_from(environ: Mapping[str, str] | None) -> str:
     return str(run)
 
 
-def _default_backend(settings: EmiSettings) -> MailBackend:
-    """The mode's backend."""
+def default_backend(settings: EmiSettings) -> MailBackend:
+    """The mode's backend: the test broker's client (``service``) or its request code in this process.
+
+    Public so a caller can wrap it before giving it to :class:`EmiApi` (the harness's named faults,
+    design §13.4).
+
+    Args:
+        settings: The API's settings.
+
+    Returns:
+        The backend.
+    """
     if settings.mode is ClientMode.INPROCESS:
         return LocalBroker(BrokerService(settings.broker))
     return BrokerClient(settings.broker)
