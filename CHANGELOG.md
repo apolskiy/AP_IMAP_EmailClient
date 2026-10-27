@@ -7,6 +7,8 @@ reasoning behind each decision is in [CLAUDE_LOG.md](CLAUDE_LOG.md).
 
 ## Unreleased
 
+## 6cf882d (2026-10-26)
+
 ### Fixed
 * **The session probe's manifest was attached to the first test.** The probe email is sent while the
   first test is being set up, so its manifest appeared in that test's evidence (seen as a second
