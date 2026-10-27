@@ -7,6 +7,8 @@ reasoning behind each decision is in [CLAUDE_LOG.md](CLAUDE_LOG.md).
 
 ## Unreleased
 
+## be46ae5 (2026-10-26)
+
 ### Changed
 * **A wait rides through a mail server restart** (AMB-78). The new outage tests showed that a wait
   running while Greenmail restarted ended at once: the dropped connection was retried, but the
