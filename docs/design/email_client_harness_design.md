@@ -555,9 +555,11 @@ User-facing details: `docs/ci_jobs.md`. Rule source: `.claude/rules/framework-ru
      side by side, a matrix, AMB-67), a chain **per OS** (Windows and Ubuntu side by side; both must
      pass). The chain stops only when a job aborts; test failures, P0 included, do not stop it (AMB-65).
      The jobs share one run ID (chosen by the chain's first job, `run-id`), and the later jobs first get
-     the P0 and P1 results, so dependents of a failed parent are skipped in later jobs too. A P2, P3 or
-     P4 test's parents are P0 or P1 tests (the three low jobs do not see each other's results). Each low
-     job fails only when it aborts; their 85% together is measured by `quality-gate`. Locally,
+     the P0 and P1 results, so dependents of a failed parent are skipped in later jobs too. A parent has
+     the child's priority or a higher one (`HARNESS_DEPENDENCY_ORDER` at collection otherwise). The three
+     low jobs do not see each other's results: a P3 or P4 test whose P2 parent failed runs and fails
+     instead of being skipped, accepted because waiting for P2 costs more. Each low job fails only when
+     it aborts; their 85% together is measured by `quality-gate`. Locally,
      `--priority P2-P4` still runs the three as one job, which itself needs 85%.
   4. `quality-gate` (Ubuntu): the gates of §9.7 over both OSes' results; builds the Allure report once.
 * **Functional job steps**: checkout → `actions/setup-python` (3.14) → `pip install -r requirements.txt

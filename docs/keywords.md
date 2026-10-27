@@ -91,6 +91,7 @@ remaining tests skipped. **info**: secondary keyword only; it never decides the 
 | `HARNESS_PROBE_EMAIL_NOT_RECEIVED` | Setup probe email did not arrive in a readable folder | skip + stop | Delivery routing, filters, accessibility matrix |
 | `HARNESS_DOCKER_UNAVAILABLE` | Real-outage test needs Docker, not available | skip | Run locally or with `ci-debug-run` on Ubuntu |
 | `HARNESS_DUPLICATE_TEST_ID` | Two tests share one TestRail ID (functional: per case, unit: per function) | collection fails | The test names listed in the message |
+| `HARNESS_DEPENDENCY_ORDER` | A test depends on a parent of a lower priority (e.g. a P1 test on a P2 test), so the parent would run after it | collection fails | Give the parent the child's priority or a higher one; a P1 parent moved to P2 by the 20% rule counts as P2 |
 
 ## Test case (`CASE_`)
 

@@ -23,7 +23,7 @@ from typing import Any
 import pytest
 
 from emi_api import EmiApi, EmiRun, RunId, default_backend, worker_number
-from emi_harness.dependencies import DependencyTracker, dependency_groups, order_tests
+from emi_harness.dependencies import DependencyTracker, dependency_groups, misplaced_parents, order_tests
 from emi_harness.evidence import Attacher, Evidence, write_settings
 from emi_harness.faults import NO_FAULT, apply_fault
 from emi_harness.jobs import JobController, StopDecision
@@ -201,6 +201,7 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         raise pytest.UsageError(message)
     depends = {cases[item.nodeid]: tuple(case_id_for("", str(parent)) for parent in _marker(item).get("depends", ()))
                for item in functional if cases[item.nodeid] and _marker(item).get("depends")}
+    _check_dependency_order(depends, {cases[item.nodeid]: plan.priorities[item.nodeid] for item in functional})
     for item in functional:
         item.stash[_ITEM] = ItemInfo(case_id=cases[item.nodeid], priority=plan.priorities[item.nodeid],
                                      timeout=_marker(item).get("timeout"), evidence=Evidence(state.attacher))
@@ -239,6 +240,14 @@ def _check_duplicates(items: list[pytest.Item], cases: dict[str, str], functiona
     if duplicates:
         lines = [f"{case_id}: {', '.join(names)}" for case_id, names in sorted(duplicates.items())]
         raise pytest.UsageError(f"{HarnessKeyword.DUPLICATE_TEST_ID}: test IDs must be unique\n" + "\n".join(lines))
+
+
+def _check_dependency_order(depends: dict[str, tuple[str, ...]], priorities: dict[str, str]) -> None:
+    """Refuse a parent that would have no result when its child runs (design §9.5, AMB-67)."""
+    misplaced = misplaced_parents(depends, priorities)
+    if misplaced:
+        raise pytest.UsageError(f"{HarnessKeyword.DEPENDENCY_ORDER}: a parent must have its child's priority or a "
+                                "higher one\n" + "\n".join(misplaced))
 
 
 def _select(config: pytest.Config, state: HarnessState, items: list[pytest.Item],

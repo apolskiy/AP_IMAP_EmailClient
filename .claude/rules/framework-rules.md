@@ -27,7 +27,7 @@ P0, P1, P2, P3 and P4 jobs run, always after lint and unit tests):
      isolated (the job continues) unless it aborts on an infrastructure failure.
    * `P2`, `P3`, `P4`: Standard and Low priority tests. Together they must reach **at least 85%** pass,
      otherwise the quality gate fails and nothing else is measured. Since the share holds for the three
-     together, each of the three jobs fails only when it aborts. Their tests' parents are P0 or P1 tests.
+     together, each of the three jobs fails only when it aborts.
    * **Overall**: (P0 + P1 + P2-P4 passed) / all functional tests must be **at least 95%**, otherwise the job fails.
 4. **Gate 4 - CI Debug Job (`ci-debug-run`)**: A separate, non-blocking pipeline job supporting custom runs from explicit test lists or file inputs.
 
@@ -50,4 +50,7 @@ reported but never turn the project status red.
   respect the connection limit.
 5. **CLI Capabilities**: Local command-line interface supports single test runs, file-based batch runs (one test name per line), and keyword-based execution (executing all tests tied to matching primary or secondary failure keywords).
 6. **Dependency Skipping**: If a main/parent test fails, dependent tests are automatically skipped in the same or lower-priority job.
+   A test depends only on tests of the same or a higher priority; a lower-priority parent fails collection
+   (`HARNESS_DEPENDENCY_ORDER`). P2, P3 and P4 run side by side, so a P3 or P4 test whose P2 parent failed
+   runs (and fails) instead of being skipped: a few extra failures cost less than waiting for P2.
 7. **Reporting**: JUnit XML and HTML reports generated in parallel. Allure results published to GitHub Pages post-run (optional on CLI via flag).

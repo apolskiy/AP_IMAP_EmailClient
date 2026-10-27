@@ -328,7 +328,7 @@ class TestEMIHarnessCli:
         controller.record(TestOutcome(nodeid="tests/emi_func_demo.py::C400001", case_id="C400001", priority="P0",
                                       status=Status.SKIPPED, primary="GREENMAIL_NOT_READY", infrastructure=True))
         calls: list[list[str]] = []
-        for job in ("P1", "P2", "P3", "P4", "P2-P4"):
+        for job in ("P1", "P2", "p3", "P4", "p2-p4"):  # any case: CI's matrix passes lowercase names
             assert main(["--priority", job], runner=lambda args: calls.append(args) or 1) == EXIT_ABORTED
         assert not calls and "GREENMAIL_NOT_READY" in capsys.readouterr().err
 

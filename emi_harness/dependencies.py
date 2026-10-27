@@ -5,8 +5,11 @@
 A test declares its parents by TestRail case ID (``@pytest.mark.emi(depends=["C400001"])``). A failed **or
 skipped** parent skips its dependents, transitively; each skip carries ``CASE_DEPENDENCY_SKIPPED`` and names
 the test at the top of the chain and its keyword. A parent runs under the same or milder conditions, so it
-lives in the same or a higher-priority job: results of earlier jobs of the same run count. A parent that was
-not run at all does not skip its children.
+has the child's priority or a higher one: results of earlier jobs of the same run count. A parent of a lower
+priority is refused at collection (``HARNESS_DEPENDENCY_ORDER``). P2, P3 and P4 run side by side in CI and do
+not see each other's results (AMB-67): a P3 or P4 test whose parent is a P2 test then runs, and fails with its
+parent, instead of being skipped. That is accepted, because waiting for P2 would cost more than a few extra
+failures. A parent that was not run at all does not skip its children.
 """
 
 from collections.abc import Mapping, Sequence
@@ -14,6 +17,26 @@ from dataclasses import dataclass
 
 from emi_harness.keywords import CaseKeyword
 from emi_harness.outcomes import CaseSkip, Status, TestOutcome
+
+
+def misplaced_parents(depends: Mapping[str, Sequence[str]], priorities: Mapping[str, str]) -> list[str]:
+    """Dependencies whose parent has a lower priority than the child, so it would run after it.
+
+    Args:
+        depends: case ID -> its parents' case IDs.
+        priorities: case ID -> effective priority (after downgrades). A parent not listed is not checked.
+
+    Returns:
+        One line per misplaced parent, e.g. ``C400002 (P1) depends on C401001 (P2)``.
+    """
+    lines = []
+    for child, parents in sorted(depends.items()):
+        own = priorities.get(child)
+        for parent in parents:
+            theirs = priorities.get(parent)
+            if own is not None and theirs is not None and theirs > own:  # "P2" > "P1": runs later
+                lines.append(f"{child} ({own}) depends on {parent} ({theirs})")
+    return lines
 
 
 @dataclass(frozen=True)

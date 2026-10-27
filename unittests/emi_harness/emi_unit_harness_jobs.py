@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from emi_harness import CaseKeyword, CaseSkip, Job, JobKeyword, Status, TestOutcome
-from emi_harness.dependencies import DependencyTracker, dependency_groups, order_tests
+from emi_harness.dependencies import DependencyTracker, dependency_groups, misplaced_parents, order_tests
 from emi_harness.jobs import BREAKER_LIMIT, JobController, read_stop
 from emi_harness.priorities import Planned, evaluate_gates, parse_priority, plan_priorities
 from emi_harness.selection import Candidate, case_id_for, duplicate_ids, read_test_file, select
@@ -152,6 +152,15 @@ class TestEMIHarnessPriorities:
 
 class TestEMIHarnessDependencies:
     """Dependency skipping (design §9.5)."""
+
+    def EMI_HARNESS_UNIT_200044_parent_must_run_first(self) -> None:
+        """The same or a higher priority is fine (a P3 test on a P2 test too, AMB-67); a lower one is refused."""
+        priorities = {"C1": "P0", "C2": "P1", "C3": "P2", "C4": "P3", "C5": "P2", "C6": "P1"}
+        fine = {"C2": ("C1",), "C3": ("C1", "C2", "C5"), "C4": ("C2", "C3", "C9")}
+        assert not misplaced_parents(fine, priorities)
+        wrong = {"C3": ("C4",), "C6": ("C3",), "C1": ("C2",)}
+        assert misplaced_parents(wrong, priorities) == ["C1 (P0) depends on C2 (P1)", "C3 (P2) depends on C4 (P3)",
+                                                        "C6 (P1) depends on C3 (P2)"]
 
     def EMI_HARNESS_UNIT_200040_failed_parent_skips_chain(self) -> None:
         """A failed parent skips its child and grandchild, naming the top of the chain and its keyword."""
