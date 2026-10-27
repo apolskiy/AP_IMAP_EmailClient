@@ -7,7 +7,12 @@ reasoning behind each decision is in [CLAUDE_LOG.md](CLAUDE_LOG.md).
 
 ## Unreleased
 
+Nothing yet.
+
+## bd67917 (2026-10-26)
+
 ### Added
+* **`CHANGELOG.md`**, covering every commit since the first one.
 * **Critical (P0) tests for one email of each kind** (AMB-68). The P0 report listed one test, because
   only C400001 (an activation link) was P0. P0 now has 5 tests: C400001 (activation link), C400002
   (invitation link, moved from P2), the new C400006 (a generic email arrives and neither link can be
