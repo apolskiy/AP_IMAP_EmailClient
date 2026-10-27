@@ -24,7 +24,10 @@ _SHAPE = {Preset.ALL_TO_ONE: [10], Preset.EVEN_5: [2, 2, 2, 2, 2], Preset.UNEVEN
 _MIXES = {"activation-10": {"activation": 10},
           "mixed-4-3-3": {"activation": 4, "invitation": 3, "generic": 3},
           "invitation-generic-5-5": {"invitation": 5, "generic": 5}}
-_PRIORITY = {Preset.ALL_TO_ONE: "P2", Preset.EVEN_5: "P2", Preset.UNEVEN_5: "P3", Preset.ONE_EACH_10: "P4"}
+# By seed, not by preset (AMB-70): P2 covers every preset x order x field x mix x concurrency with seeds 1-2,
+# P3 and P4 add seeds 3-4 and 5-6. Each of the three parallel jobs then sends about as much mail as the
+# others, so no job's mailbox grows twice as large and slows its later waits.
+_PRIORITY_OF_SEED = {1: "P2", 2: "P2", 3: "P3", 4: "P3", 5: "P4", 6: "P4"}
 
 
 @dataclass(frozen=True)
@@ -51,7 +54,7 @@ class TestEMIBatches:
     """A batch arrives complete, each email at its planned address."""
 
     @pytest.mark.parametrize("batch", cases(410000, BATCHES, name=lambda value: value[0].name,
-                                            priority=lambda value: _PRIORITY[value[0].preset]))
+                                            priority=lambda value: _PRIORITY_OF_SEED[value[0].seed]))
     def EMI_TOOL_FUNC_410000_batch_arrives_as_planned(self, api: EmiApi, steps: Steps, emi_run: EmiRun,
                                                       batch: Batch) -> None:
         """Every address gets exactly its planned emails; the kinds and the preset's shape are as asked."""

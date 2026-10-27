@@ -40,7 +40,8 @@ def _batch(preset: Preset, field: str, mix: str, *, concurrency: int = 1, seed: 
 CATCHES: dict[str, tuple[Catch, ...]] = {
     "sender-drops-email": (
         # send and send_batch both drop one email (the counts family sends batches).
-        Catch(("C400001", _counts("activation", "to", 3), _counts("invitation", "cc", 2),
+        Catch(("C400001", "C400002", "C400006", "C400007", "C400008",
+               _counts("activation", "to", 3), _counts("invitation", "cc", 2),
                _counts("generic", "bcc", 1), _case(403000, emi_func_markers.FORM_CASES, "activation", "case-id"),
                _case(404000, emi_func_timing.CASES, "invitation", 0.5)), (_NOT_RECEIVED,)),
         # One email fewer arrives, so "one more than expected" is never reached: the expected error is missing.
@@ -81,7 +82,8 @@ CATCHES: dict[str, tuple[Catch, ...]] = {
               (_VERIFICATION,)),
     ),
     "reader-wrong-link": (
-        Catch(("C400001", _counts("activation", "to", 1), _counts("invitation", "cc", 2)), (_VERIFICATION,)),
+        Catch(("C400001", "C400002", "C400007", "C400008", _counts("activation", "to", 1),
+               _counts("invitation", "cc", 2)), (_VERIFICATION,)),
     ),
     "reader-gives-up-early": (
         Catch(tuple(_case(404000, emi_func_timing.CASES, kind, delay)

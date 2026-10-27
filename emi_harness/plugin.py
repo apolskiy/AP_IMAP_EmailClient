@@ -23,6 +23,7 @@ from typing import Any
 import pytest
 
 from emi_api import EmiApi, EmiRun, RunId, default_backend, worker_number
+from emi_harness.allure_report import priority_marks, record_outcome, write_categories
 from emi_harness.dependencies import DependencyTracker, dependency_groups, misplaced_parents, order_tests
 from emi_harness.evidence import Attacher, Evidence, write_settings
 from emi_harness.faults import NO_FAULT, apply_fault
@@ -74,6 +75,7 @@ class HarnessState:  # pylint: disable=too-many-instance-attributes
     attacher: Attacher | None = None
     current: ItemInfo | None = None
     counts_asserts: bool = False
+    allure: bool = False
 
 
 _STATE = pytest.StashKey[HarnessState]()
@@ -132,8 +134,10 @@ def pytest_configure(config: pytest.Config) -> None:
                          controller=JobController(job, budget_sec=budget, stop_dir=directory,
                                                   breaker=False if fault_run else None),
                          writer=ResultsWriter(directory, worker), hook=hook, attacher=attacher,
-                         counts_asserts=bool(config.getini("enable_assertion_pass_hook")))
+                         counts_asserts=bool(config.getini("enable_assertion_pass_hook")), allure=hook is not None)
     config.stash[_STATE] = state
+    if state.allure:
+        write_categories(Path(config.option.allure_report_dir))
 
 
 def _allure(config: pytest.Config) -> tuple[StepHook | None, Attacher | None]:
@@ -205,6 +209,8 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     for item in functional:
         item.stash[_ITEM] = ItemInfo(case_id=cases[item.nodeid], priority=plan.priorities[item.nodeid],
                                      timeout=_marker(item).get("timeout"), evidence=Evidence(state.attacher))
+    if state.allure:
+        _label_priorities(functional)
     kept, unmatched = _select(config, state, items, cases)
     deselected = [item for item in items if id(item) not in {id(chosen) for chosen in kept}]
     if deselected:
@@ -221,6 +227,13 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         (state.directory / _COLLECTION_FILE).write_text(json.dumps({"priorities": message, "unmatched": unmatched,
                                                                     "selected": selected}, indent=2),
                                                         encoding="utf-8")
+
+
+def _label_priorities(functional: list[pytest.Item]) -> None:
+    """Give each functional test its priority as Allure labels: parent suite, severity and tag (AMB-69)."""
+    for item in functional:
+        for mark in priority_marks(item.stash[_ITEM].priority):
+            item.add_marker(mark)
 
 
 def _group_dependents(items: list[pytest.Item], cases: dict[str, str], depends: dict[str, tuple[str, ...]]) -> None:
@@ -385,6 +398,8 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) ->
     if call.when == "teardown":
         outcome = _finish(item, info, state)
         report.user_properties = list(report.user_properties) + _properties(outcome)
+        if state.allure:
+            record_outcome(outcome)
     return report
 
 

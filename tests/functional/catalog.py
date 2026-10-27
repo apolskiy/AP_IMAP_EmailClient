@@ -12,7 +12,7 @@ ID blocks (functional range 400000-599999):
 =================  ===========================================  ==========
 Block              Family                                       Cases
 =================  ===========================================  ==========
-400001-400005      delivery basics (``emi_func_delivery``)       5
+400001-400008      delivery basics (``emi_func_delivery``)       8
 401000-401089      counts per kind and field (``emi_func_counts``)  90
 401500-401508      count exceeded (``emi_func_counts``)           9
 402000-402008      recipient fields not matched (``emi_func_fields``)  9

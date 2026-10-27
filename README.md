@@ -13,7 +13,7 @@ with its mail-server connections and its log. The tool also has command lines of
 
 > **Status:** implementation in progress. The reader, sender, Greenmail client, test broker, central
 > API (`EmiApi`) and test harness are built, unit-tested and checked against Greenmail, and the
-> functional suite has 1,016 test cases, with CI workflows and test-validity checks (design §13.4).
+> functional suite has 1,019 test cases, with CI workflows and test-validity checks (design §13.4).
 > What is built and what is not yet is tracked in [docs/rtm.md](docs/rtm.md).
 
 ## Getting Started
@@ -186,12 +186,16 @@ Every `--emi-*` setting (`python -m emi_harness.cli --help`) can also be given a
 environment variable or in `.env`; a command-line value wins. Plain `python -m pytest tests` runs the
 same functional tests with the same `--emi-*` options.
 
-The functional suite (`tests/functional/`) has 1,016 test cases: delivery basics, counts per kind and
+The functional suite (`tests/functional/`) has 1,019 test cases. The 5 critical (P0) ones send one email of
+each kind (activation and invitation must yield their links, generic must yield none), and, per link kind,
+wait for that link while two other emails arrive first. The others: delivery basics, counts per kind and
 recipient field, recipient fields not matched, markers, mail arriving during the wait, isolation from
 other tests' mail, and 864 batch cases (every distribution preset × send order × recipient field × kind
 mix × concurrency × seed). Each parametrized case is its own TestRail case, so `--test C410123` runs
 exactly one. The ID blocks are listed in `tests/functional/catalog.py`. Run one worker at a time and the
-whole suite takes about an hour against a local Greenmail; `-n 4` shortens it.
+whole suite takes about an hour against a local Greenmail; `-n 4` shortens it. In CI, with 4 workers per
+job and P2, P3 and P4 side by side, the first full run passed all 1,016 tests then in the suite on both
+operating systems in about 20 minutes.
 
 Reports go to `reports/<run>/<job>/`: `junit.xml`, `report.html`, `results-<worker>.jsonl` (one line
 per test with its keywords and step log), `settings.json` (every setting with its source, passwords
@@ -248,6 +252,18 @@ the Allure command line, which runs on Java.
    Without the Allure command line, the run still passes or fails as usual, keeps the raw results in
    `allure-results/`, and prints a warning that no Allure HTML was built.
 
+**What the Allure report shows.** CI publishes one report from both operating systems to GitHub Pages
+after each run on `main`.
+
+* **Suites** groups every test by priority, P0 to P4. **Graphs** shows the same split as severity:
+  blocker (P0), critical (P1), normal (P2), minor (P3), trivial (P4).
+* **Categories** groups the tests that did not pass by cause: Greenmail, test broker, reader, sender,
+  public API, harness, job stopped, skipped because a parent test did not pass, email not received, more
+  emails than expected, link problems, verification failed, other test-case failures. Each message starts
+  with its keyword, e.g. `[CASE_EMAIL_NOT_RECEIVED] step S02 ...`. Allure lists only failed, broken and
+  skipped tests here, so the tab is empty when everything passed.
+* A test that ran on both Windows and Ubuntu appears once, with the other run under **Retries**.
+
 ### Using another mail server, and credentials
 
 The project targets **Greenmail** and needs no credentials beyond the local `qa` user above. To run
@@ -283,6 +299,19 @@ user `qa` with the public password `password`, so nothing needs configuring. To 
 * **P0 and P1** are must-pass tests that prove core functionality. **P0 tests are the critical
   tests; P1 tests are the high-priority tests.** Together they may be at most **20% of all tests**
   and use at most **20% of the run time**.
+* **What each priority holds today** (1,019 tests):
+
+  | Priority | Tests | What |
+  |---|---|---|
+  | P0 | 5 | one email of each kind: activation and invitation yield their links, generic yields none; per link kind, a wait that skips two other emails for the later matching one |
+  | P1 | 9 | one email of each kind in To, Cc and Bcc, counted exactly |
+  | P2 | 406 | every batch preset × order × field × kind mix × concurrency with seeds 1-2; counts of 2 to 10; fields, markers, arrival during the wait |
+  | P3 | 311 | the same batches with seeds 3-4; counts exceeded, isolation, other delivery checks |
+  | P4 | 288 | the same batches with seeds 5-6 |
+
+  Batches are split by seed rather than by preset so the three side-by-side jobs send about the same
+  mail and take about as long. Each job's Greenmail mailbox fills as it runs, and a fuller mailbox makes
+  every wait slower.
 * **Any P0 failure** is a critical failure (`JOB_CRITICAL_FUNCTIONAL_FAILURE`): the P0 job fails and
   so does the project status, but nothing stops. The P0 job finishes its other tests, P1 and P2–P4
   still run, and only the tests that depend on the failed one are skipped, in every job.
@@ -363,11 +392,12 @@ says how much of it is built.
 
 | File | What it contains |
 |---|---|
-| [docs/design/phase0_email_client_ambiguities.md](docs/design/phase0_email_client_ambiguities.md) | **Ambiguity register (Phase 0).** Every open question (AMB-01 to AMB-63) with its severity, the options considered, the recommendation and the author's decision; the status of open questions; **Spike Evidence**: measurements and bugs found against a live Greenmail that decisions rest on. |
+| [docs/design/phase0_email_client_ambiguities.md](docs/design/phase0_email_client_ambiguities.md) | **Ambiguity register (Phase 0).** Every open question (AMB-01 to AMB-70) with its severity, the options considered, the recommendation and the author's decision; the status of open questions; **Spike Evidence**: measurements and bugs found against a live Greenmail that decisions rest on. |
 | [docs/design/email_client_harness_design.md](docs/design/email_client_harness_design.md) | **Design document (Phase 2)**, each section citing the register rows it implements (see the next table). |
 | [docs/rtm.md](docs/rtm.md) | **Requirements traceability matrix.** Each requirement → design section → code → unit test IDs → status (Done / Partial with the gap named / Planned). |
 | [docs/keywords.md](docs/keywords.md) | **Failure keyword catalog.** Keyword grammar; every `READER_`, `SENDER_`, `TEST_BROKER_`, `GREENMAIL_`, `API_`, `HARNESS_`, `CASE_` and `JOB_` keyword with its meaning, outcome (fail / skip / skip + stop / info) and the first thing to check. A unit test fails if code uses a keyword missing here. |
 | [docs/ci_jobs.md](docs/ci_jobs.md) | **CI jobs.** When CI runs, overlapping runs, the joint CI workflow (lint, unit, P0 → P1 → P2 / P3 / P4, quality gate), the standalone jobs, and the local command for each job. |
+| [CHANGELOG.md](CHANGELOG.md) | **Change log.** What changed in each commit, newest first, with the CI runs that found the problems it fixed. |
 | [CLAUDE_LOG.md](CLAUDE_LOG.md) | **Decision and quality log.** What was built in each phase and step, key architectural decisions with their register rows, and pylint scores over time. |
 | [CLAUDE.md](CLAUDE.md), [.claude/rules/](.claude/rules) | **Working rules** the AI collaborator followed: no AI commits, design before code, pylint 10.00/10, naming, test IDs, shell rules. |
 

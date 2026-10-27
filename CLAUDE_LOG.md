@@ -50,6 +50,10 @@ live in `docs/design/phase0_email_client_ambiguities.md`; this log records when 
 | 2026-10-27 | Windows CI: Greenmail started through WMI, because a step's child process ends with the step on Windows runners | Design §12 |
 | 2026-10-27 | The status workflow is `joint-ci-workflow`; a manual run ticks its functional jobs; P2, P3 and P4 run as three jobs side by side, their 85% measured together by `quality-gate` | AMB-66, AMB-67 |
 | 2026-10-27 | `--priority` accepts any case, and the gate is told which jobs were chosen (`--expect`): a chosen job without a `collection.json` fails it (`JOB_RESULT_MISSING`), checked per OS. CI run 40436448076 passed the gate on 10 of 1,016 tests after its P2, P3 and P4 jobs exited on a lowercase `--priority p2` | Design §9.7 |
+| 2026-10-27 | P0 is one email of each kind: activation and invitation links (C400001, C400002) and a generic email with no link (new C400006), and per link kind a wait that skips two non-matching emails for a later matching one (new C400007, C400008); the P0 report had listed a single test | AMB-68 |
+| 2026-10-27 | Allure: priorities are labels (`parentSuite`, `severity`, `tag`), failure keyword families are categories; the harness verdict sets each non-passed result's status and `[KEYWORD]` message, because Allure categories match only messages and never see passed tests | AMB-69 |
+| 2026-10-27 | Batch cases split across P2, P3 and P4 by seed: in runs 40437111627 and 40437565154 P2 took 16-25 min against about 4 for P3 and P4, because it sent about twice the mail and every wait searches the whole mailbox, which slows as it fills | AMB-70 |
+| 2026-10-27 | `CHANGELOG.md` started, covering every commit since the first one | n/a |
 
 ## Pylint scores
 

@@ -503,6 +503,19 @@ history. Output in `reports/<run id>/`.
   JSON attachment.
 * The raw email, the test broker's log entries for the test and the mailbox inventory (§5.8) are not yet
   attached (RTM R-HN-06).
+* **Allure views** (AMB-69, `emi_harness/allure_report.py`). Allure's Categories tab classifies only failed,
+  broken and skipped results, by status and a regex on the message, and never shows passed tests; it
+  cannot read labels. So:
+  * **Priority is a label** on every test: `parentSuite` P0 to P4 (the Suites tab groups every test by
+    priority), `severity` blocker (P0), critical (P1), normal (P2), minor (P3), trivial (P4), and a `tag`.
+  * **Failure cause is a category.** `categories.json` is written into every `allure-results` folder, one
+    category per keyword family: Greenmail, test broker, reader, sender, public API, harness, job
+    stopped, skipped because a parent did not pass, email not received, more emails than expected, link
+    problems, verification failed, other test-case failures. Each keyword falls into exactly one.
+  * At teardown the harness verdict sets the Allure result's status (`broken` for an infrastructure
+    cause) and message `[KEYWORD] step Snn message (secondary: ...)`. Allure would otherwise record the
+    exception text without the keyword, and no message at all for failures the harness decides itself
+    (`CASE_NO_VERIFICATION`, `CASE_TIMEOUT`).
 
 ## 10. Time Budgets (AMB-22, AMB-49)
 
@@ -635,6 +648,15 @@ or the circuit breaker.
   recipient mismatch via `sub`.
 * **Scale**: parametrized families (kinds × fields × distributions × orders × transports) reach
   **1,000+** test cases with unique IDs in 400000–599999, P0 + P1 within 20%.
+* **Critical (P0)** (AMB-68): one email of each kind, sent and received: an activation email yields its
+  link, an invitation email yields its link, and a generic email yields no link (neither CTA can be
+  extracted, `CASE_LINK_NOT_FOUND`). Per link kind, a wait for that link with two non-matching emails
+  already in the mailbox returns only the matching email sent 2 s into the wait. If any of these fails,
+  nothing else the tool does can be trusted.
+* **P2, P3 and P4 by seed** (AMB-70): every batch preset × order × field × kind mix × concurrency runs
+  with seeds 1-2 in P2, 3-4 in P3 and 5-6 in P4. The three jobs run side by side, each with its own
+  Greenmail, and a wait's search covers the whole mailbox, so a job that sends more mail slows its own
+  later tests; with the split each job sends about the same mail (P2 406 tests, P3 311, P4 288).
 
 ### 13.4 Test validity (AMB-64)
 A test is only worth its result if it fails when the tool is broken (no **false positive**) and passes when
@@ -648,14 +670,14 @@ and the keyword they must fail with:
 
 | Fault | What breaks | Must be caught by | Expected keyword |
 |---|---|---|---|
-| `sender-drops-email` | `send` and `send_batch` deliver one email fewer than asked; the manifest still lists them all | delivery 400001–400004, counts, counts exceeded, arrival during the wait | `CASE_EMAIL_NOT_RECEIVED`; counts exceeded: `CASE_VERIFICATION_FAILED` (the expected error is not raised) |
+| `sender-drops-email` | `send` and `send_batch` deliver one email fewer than asked; the manifest still lists them all | delivery 400001, 400002, 400006–400008, counts, counts exceeded, markers, arrival during the wait | `CASE_EMAIL_NOT_RECEIVED`; counts exceeded: `CASE_VERIFICATION_FAILED` (the expected error is not raised) |
 | `sender-ignores-field` | a batch puts the address in `To`, whatever field was asked | counts and batches in `Cc` / `Bcc`; fields not matched (`cc` / `bcc` sent) | `CASE_EMAIL_NOT_RECEIVED`; fields: `CASE_VERIFICATION_FAILED` |
 | `reader-any-field` | a wait matches the address in every recipient field, whatever `match_fields` says | fields not matched | `CASE_VERIFICATION_FAILED` |
 | `reader-ignores-markers` | a wait drops its test and run markers | other run's marker not matched | `CASE_VERIFICATION_FAILED` |
 | `reader-slot-collapse` | a wait for a slot address `<run>-rNN` reads slot 0 instead | batches over 5 or 10 addresses; isolation (own extra slot) | `CASE_EMAIL_NOT_RECEIVED`, `CASE_EMAIL_COUNT_EXCEEDED` or `CASE_VERIFICATION_FAILED` |
 | `reader-duplicates-email` | a wait returns one email twice in place of another (same count) | counts of 2 or more, batches, delivery 400004 | `CASE_VERIFICATION_FAILED` |
 | `reader-returns-extra` | a wait returns one email more than asked | counts, batches (they compare received and sent emails as lists, not sets) | `CASE_VERIFICATION_FAILED` |
-| `reader-wrong-link` | the link returned differs from the email's link in one character | delivery 400001–400004, counts | `CASE_VERIFICATION_FAILED` |
+| `reader-wrong-link` | the link returned differs from the email's link in one character | delivery 400001, 400002, 400007, 400008, counts | `CASE_VERIFICATION_FAILED` |
 | `reader-gives-up-early` | a wait gives up after 1 s, whatever its timeout | arrival during the wait (2 s or later) | `CASE_EMAIL_NOT_RECEIVED` |
 
 `python -m emi_harness.validity faults [--fault <name>]` runs each fault's catching tests under that fault
