@@ -7,6 +7,13 @@ reasoning behind each decision is in [CLAUDE_LOG.md](CLAUDE_LOG.md).
 
 ## Unreleased
 
+### Changed
+* **README lists the features that are designed but not yet implemented.** A new section names each
+  one (shared poll loop, a connection per worker in `inprocess` mode, several accounts, recipient field
+  combinations, the sender CLI through the broker, one option table for every CLI, setting sources in
+  `/health`, a generated keywords doc, the Gmail queue, and the functional cases that need them), what
+  the code does today, and its RTM row. They had been visible only in the RTM.
+
 ## 6cf882d (2026-10-26)
 
 ### Fixed

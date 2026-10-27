@@ -693,6 +693,24 @@ account. Real servers limit this: Gmail allows about **15** simultaneous IMAP co
 * Parallel runs never pick up each other's emails: every address carries the test ID and the
   run ID. No run purges the shared mailbox while others may be running.
 
+## Designed but Not Yet Implemented
+
+These features are in the design and have a register decision, but the code does not do them yet.
+Each one is a "Partial" row in [docs/rtm.md](docs/rtm.md), which says exactly what is built today.
+
+| Feature | Today | RTM |
+|---|---|---|
+| **One shared poll loop** in the test broker serving every waiting test (design §5.4) | Each wait polls the mailbox on its own pooled connection, within the `max_connections` budget | R-RD-05 |
+| **A dedicated IMAP connection per worker** in `inprocess` mode | Waits take a connection from a pool inside the test process, so a worker is not tied to one connection | R-RD-03 |
+| **Several mail accounts**, and skipping a test whose expected folder is not accessible (`READER_MAILBOX_EXPECTED_FOLDER_INACCESSIBLE`) | One account; an inaccessible folder appears in the accessibility matrix | R-RD-04 |
+| **Recipient field combinations** in one email (for example `To` and `Cc`) | One recipient field per email | R-SD-04 |
+| **The sender CLI going through the broker** by default, with `--direct` to bypass it | The sender CLI always sends directly | R-SD-06 |
+| **One option table for every CLI** (sender and broker as well as the harness) | The harness CLI and the pytest plugin share it; the sender and broker CLIs define their own options | R-CFG-02 |
+| **Setting sources in the broker's `/health`** | `/health` shows values; the sources are in each job's `settings.json` | R-CFG-04 |
+| **`docs/keywords.md` generated from the code** | Written by hand; a unit test checks that every keyword in the code is in it | R-KW-01 |
+| **Queueing jobs that share a real mailbox** (Gmail) instead of running them side by side | No Gmail job exists yet; every CI job uses its own Greenmail | R-CI-01 |
+| **Functional tests for** `Delivered-To` / `X-Original-To` recipients, field combinations, accessibility failures and link variants | Not in the functional suite: the email templates cannot produce these cases yet, and combinations need R-SD-04 | R-TS-03 |
+
 ## What Was Left Out
 
 * **Separate repositories for the tools, the harness and the test cases.** Ideally each would be its own
