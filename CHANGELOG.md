@@ -7,6 +7,8 @@ reasoning behind each decision is in [CLAUDE_LOG.md](CLAUDE_LOG.md).
 
 ## Unreleased
 
+## 9d14db8 (2026-10-27)
+
 ### Added
 * **A run can delete its own mail and nothing else (AMB-79).** `python -m emi_test_broker purge --run-id
   <run>`, `EmiApi.delete_run_mail()` and the harness option `--emi-delete-own-mail on` delete the mail of
