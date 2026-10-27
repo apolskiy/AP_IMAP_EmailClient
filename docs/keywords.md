@@ -103,7 +103,8 @@ remaining tests skipped. **info**: secondary keyword only; it never decides the 
 | `CASE_LINK_AMBIGUOUS` | Several different CTA links | fail | Email template |
 | `CASE_LINK_HTML_TEXT_MISMATCH` | HTML and text parts link to different URLs (possible phishing) | fail (or warn by option) | Both links in the report |
 | `CASE_LINK_RECIPIENT_MISMATCH` | The link's token belongs to another address | fail | Application or test mixes recipients |
-| `CASE_VERIFICATION_FAILED` | A step's `verify` (or a plain `assert`) was false | fail | The verification named in the message |
+| `CASE_VERIFICATION_FAILED` | A step's `verify` (or a plain `assert`) was false, or a `pytest.raises` was not satisfied ("DID NOT RAISE") | fail | The verification named in the message |
+| `CASE_NO_VERIFICATION` | The test would have passed without a single `step.verify` or passing `assert` (design §13.4) | fail | The test: add the checks it is meant to make |
 | `CASE_UNEXPECTED_ERROR` | An untyped exception inside the test (its class is the secondary keyword) | fail | Test code or an unhandled application response |
 | `CASE_STEP_TIMEOUT` | A step exceeded its time limit | fail | Step budget, slow operation |
 | `CASE_TIMEOUT` | The test exceeded its time limit | fail | Test budget |

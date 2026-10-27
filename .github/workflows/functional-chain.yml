@@ -1,0 +1,70 @@
+# SPDX-FileCopyrightText: 2026 Aleksandr Polskiy
+# SPDX-License-Identifier: Apache-2.0
+# The functional chain of one operating system: P0 -> P1 -> P2-P4 (design §12, framework rules §1).
+# Each job has its own runner and Greenmail. The chain stops only when a job aborts: any P0 failure
+# aborts (JOB_CRITICAL_FUNCTIONAL_FAILURE), so P1 needs P0 passed; P2-P4 runs after P1 unless P1 aborted
+# (exit 2) or never produced an exit code (setup failed).
+name: functional-chain
+
+on:
+  workflow_call:
+    inputs:
+      os:
+        description: Runner image, ubuntu-latest or windows-latest.
+        required: true
+        type: string
+      label:
+        description: Short OS name used in artifact names.
+        required: true
+        type: string
+      workers:
+        description: Parallel workers (capped at max_connections by the harness).
+        required: false
+        type: string
+        default: "4"
+
+permissions:
+  contents: read
+
+jobs:
+  functional-p0:
+    runs-on: ${{ inputs.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/harness-job
+        with:
+          command: emi_harness.cli --priority P0 --allure -n ${{ inputs.workers }}
+          artifact: reports-${{ inputs.label }}-p0
+          password: ${{ secrets.EMI_GREENMAIL_PASSWORD || 'password' }}
+
+  functional-p1:
+    needs: functional-p0
+    if: ${{ !cancelled() && needs.functional-p0.result == 'success' }}
+    runs-on: ${{ inputs.os }}
+    timeout-minutes: 20
+    outputs:
+      exit-code: ${{ steps.job.outputs.exit-code }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: job
+        uses: ./.github/actions/harness-job
+        with:
+          command: emi_harness.cli --priority P1 --allure -n ${{ inputs.workers }}
+          artifact: reports-${{ inputs.label }}-p1
+          password: ${{ secrets.EMI_GREENMAIL_PASSWORD || 'password' }}
+
+  functional-p2-p4:
+    needs: functional-p1
+    if: >-
+      ${{ !cancelled() && needs.functional-p1.result != 'skipped'
+      && needs.functional-p1.outputs.exit-code != '' && needs.functional-p1.outputs.exit-code != '2' }}
+    runs-on: ${{ inputs.os }}
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/harness-job
+        with:
+          command: emi_harness.cli --priority P2-P4 --allure -n ${{ inputs.workers }}
+          artifact: reports-${{ inputs.label }}-p2-p4
+          password: ${{ secrets.EMI_GREENMAIL_PASSWORD || 'password' }}

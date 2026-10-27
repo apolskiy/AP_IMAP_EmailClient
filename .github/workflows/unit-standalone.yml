@@ -1,0 +1,118 @@
+# SPDX-FileCopyrightText: 2026 Aleksandr Polskiy
+# SPDX-License-Identifier: Apache-2.0
+# Standalone unit jobs, one per tool (design §12): outside project status, never blocking.
+# Each runs when its own tool folder or unit-test folder changed, or by hand.
+name: unit-standalone
+
+on:
+  push:
+    paths:
+      - "emi_reader/**"
+      - "emi_sender/**"
+      - "emi_test_broker/**"
+      - "emi_greenmail/**"
+      - "emi_harness/**"
+      - "unittests/emi_reader/**"
+      - "unittests/emi_sender/**"
+      - "unittests/emi_test_broker/**"
+      - "unittests/emi_greenmail/**"
+      - "unittests/emi_harness/**"
+  pull_request:
+    branches: [main]
+    paths:
+      - "emi_reader/**"
+      - "emi_sender/**"
+      - "emi_test_broker/**"
+      - "emi_greenmail/**"
+      - "emi_harness/**"
+      - "unittests/emi_reader/**"
+      - "unittests/emi_sender/**"
+      - "unittests/emi_test_broker/**"
+      - "unittests/emi_greenmail/**"
+      - "unittests/emi_harness/**"
+  workflow_dispatch:
+    inputs:
+      tool:
+        description: Tool to test
+        type: choice
+        default: all
+        options: [all, emi_reader, emi_sender, emi_test_broker, emi_greenmail, emi_harness]
+
+concurrency:
+  group: >-
+    unit-standalone-${{ (github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main')
+    && github.run_id || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      tools: ${{ steps.pick.outputs.tools }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: pick
+        env:
+          EVENT: ${{ github.event_name }}
+          CHOSEN: ${{ inputs.tool }}
+          BEFORE: ${{ github.event.before }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.sha }}
+        run: |
+          all="emi_reader emi_sender emi_test_broker emi_greenmail emi_harness"
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            [ "$CHOSEN" = "all" ] && picked="$all" || picked="$CHOSEN"
+          else
+            from="${BASE:-$BEFORE}"
+            if [ -z "$from" ] || ! git cat-file -e "$from^{commit}" 2>/dev/null; then
+              changed=$(git ls-files)          # new branch or unknown base: test every tool
+            else
+              changed=$(git diff --name-only "$from" "$HEAD")
+            fi
+            picked=""
+            for tool in $all; do
+              if echo "$changed" | grep -qE "^(unittests/)?$tool/"; then picked="$picked $tool"; fi
+            done
+          fi
+          echo "tools=$picked" >> "$GITHUB_OUTPUT"
+          echo "tools to test:$picked"
+
+  unit-emi-reader:
+    needs: changes
+    if: contains(needs.changes.outputs.tools, 'emi_reader')
+    uses: ./.github/workflows/unit-tool.yml
+    with:
+      tool: emi_reader
+
+  unit-emi-sender:
+    needs: changes
+    if: contains(needs.changes.outputs.tools, 'emi_sender')
+    uses: ./.github/workflows/unit-tool.yml
+    with:
+      tool: emi_sender
+
+  unit-emi-test-broker:
+    needs: changes
+    if: contains(needs.changes.outputs.tools, 'emi_test_broker')
+    uses: ./.github/workflows/unit-tool.yml
+    with:
+      tool: emi_test_broker
+
+  unit-emi-greenmail:
+    needs: changes
+    if: contains(needs.changes.outputs.tools, 'emi_greenmail')
+    uses: ./.github/workflows/unit-tool.yml
+    with:
+      tool: emi_greenmail
+
+  unit-emi-harness:
+    needs: changes
+    if: contains(needs.changes.outputs.tools, 'emi_harness')
+    uses: ./.github/workflows/unit-tool.yml
+    with:
+      tool: emi_harness

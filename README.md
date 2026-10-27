@@ -1,12 +1,20 @@
 # AP_IMAP_EmailClient
 
-A Python library and test harness for end-to-end tests that wait for emails sent by an application
-(account activation, site invitation, …) and extract the link behind the email's main button,
-over IMAP, with many tests running in parallel against one shared mailbox.
+An email tool, a Python library and a test harness for end-to-end tests that wait for emails sent by
+an application (account activation, site invitation, …) and extract the link behind the email's main
+button, with many tests running in parallel against one shared mailbox.
+
+The **tool** sends emails over SMTP (playing the application) and checks for them over IMAP. It runs
+as a background process, the test broker (port 8025), which every test run on the machine shares, along
+with its mail-server connections and its log. The tool also has command lines of its own
+(`python -m emi_sender`, `python -m emi_test_broker`). The **library** is the Python API tests call
+(`EmiApi`). It hands each send and wait to the tool rather than talking to the mail server itself. The
+**harness** runs the tests, applies priorities and gates, and writes the reports.
 
 > **Status:** implementation in progress. The reader, sender, Greenmail client, test broker, central
 > API (`EmiApi`) and test harness are built, unit-tested and checked against Greenmail, and the
-> functional suite has 1,016 test cases. The CI workflows are next. What is built and what is not yet is
+> functional suite has 1,016 test cases. The CI workflows and the test-validity checks (design §13.4)
+> are next. What is built and what is not yet is
 > tracked in [docs/rtm.md](docs/rtm.md).
 
 ## Getting Started
@@ -63,7 +71,7 @@ pip install -r requirements.txt -r requirements-dev.txt
 ### 3. Set up and start Greenmail on your machine
 
 [Greenmail](https://greenmail-mail-test.github.io/greenmail/) is a test mail server (SMTP + IMAP)
-that runs in Docker. The tests use it locally and in CI; the library itself works with any IMAP server.
+that runs in Docker. The tests use it locally and in CI; the tool itself works with any SMTP and IMAP server.
 
 **a) Get the image** (once; Docker Desktop must be running). The project uses the official
 `greenmail/standalone` image from Docker Hub, <https://hub.docker.com/r/greenmail/standalone>, at tag
@@ -107,7 +115,7 @@ This creates the shared mailbox user `qa@example.com` (login `qa`, password `pas
 | Port | Service | Used by |
 |---|---|---|
 | 3025 | SMTP | the sender tool |
-| 3143 | IMAP (plain) | the reader library (default) |
+| 3143 | IMAP (plain) | the tool's IMAP reader (default) |
 | 3993 | IMAPS (TLS) | TLS tests |
 | 8080 | Greenmail REST API | readiness check |
 
@@ -382,6 +390,9 @@ AP_IMAP_EmailClient/
 │       ├── skill-rules.md             # Lifecycle phases 0-4 and audit logging
 │       ├── testing-standards.md       # Test naming, TestRail IDs, ASCII-only identifiers
 │       └── worktree-rules.md          # No AI commits, secrets protection, IDE ignores
+├── .github/
+│   ├── workflows/             # CI: main pipeline, functional chain per OS, standalone unit jobs, debug run
+│   └── actions/               # Shared CI steps: start Greenmail, run one harness job
 ├── docs/
 │   ├── ci_jobs.md             # CI jobs and how to run them
 │   ├── keywords.md            # Failure keyword catalog

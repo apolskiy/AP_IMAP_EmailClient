@@ -1,0 +1,73 @@
+# SPDX-FileCopyrightText: 2026 Aleksandr Polskiy
+# SPDX-License-Identifier: Apache-2.0
+# Starts Greenmail on the runner and waits until it is ready (design §12).
+# Ubuntu: the greenmail/standalone container, same options as the README. Windows runners cannot run
+# Linux containers, so there the standalone JAR runs on Java 17 in the background.
+name: Start Greenmail
+description: Start Greenmail (Docker on Linux, JAR on Windows) and wait for its readiness endpoint.
+inputs:
+  password:
+    description: Password of the test user qa@example.com.
+    required: false
+    default: password
+  version:
+    description: Greenmail version.
+    required: false
+    default: 2.1.15
+runs:
+  using: composite
+  steps:
+    - name: Start the Greenmail container (Linux)
+      if: runner.os == 'Linux'
+      shell: bash
+      env:
+        GREENMAIL_PASSWORD: ${{ inputs.password }}
+        GREENMAIL_VERSION: ${{ inputs.version }}
+      run: >
+        docker run -d --name greenmail_server
+        -p 3025:3025 -p 3143:3143 -p 3993:3993 -p 8080:8080
+        -e GREENMAIL_OPTS="-Dgreenmail.setup.test.all -Dgreenmail.hostname=0.0.0.0 -Dgreenmail.users=qa:${GREENMAIL_PASSWORD}@example.com"
+        "greenmail/standalone:${GREENMAIL_VERSION}"
+
+    - name: Set up Java 17 (Windows)
+      if: runner.os == 'Windows'
+      uses: actions/setup-java@v4
+      with:
+        distribution: temurin
+        java-version: "17"
+
+    - name: Cache the Greenmail JAR (Windows)
+      if: runner.os == 'Windows'
+      uses: actions/cache@v4
+      with:
+        path: ${{ runner.temp }}/greenmail
+        key: greenmail-standalone-${{ inputs.version }}
+
+    - name: Start the Greenmail JAR (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      env:
+        GREENMAIL_PASSWORD: ${{ inputs.password }}
+        GREENMAIL_VERSION: ${{ inputs.version }}
+      run: |
+        $folder = Join-Path $env:RUNNER_TEMP "greenmail"
+        $jar = Join-Path $folder "greenmail-standalone-$env:GREENMAIL_VERSION.jar"
+        if (-not (Test-Path $jar)) {
+          New-Item -ItemType Directory -Force $folder | Out-Null
+          Invoke-WebRequest "https://repo1.maven.org/maven2/com/icegreen/greenmail-standalone/$env:GREENMAIL_VERSION/greenmail-standalone-$env:GREENMAIL_VERSION.jar" -OutFile $jar
+        }
+        $arguments = @("-Dgreenmail.setup.test.all", "-Dgreenmail.hostname=127.0.0.1",
+                       "-Dgreenmail.users=qa:$env:GREENMAIL_PASSWORD@example.com", "-jar", $jar)
+        Start-Process java -ArgumentList $arguments -WindowStyle Hidden `
+          -RedirectStandardOutput (Join-Path $folder "greenmail.out.log") `
+          -RedirectStandardError (Join-Path $folder "greenmail.err.log")
+
+    - name: Wait for Greenmail readiness
+      shell: bash
+      run: |
+        for attempt in $(seq 1 60); do
+          if curl -fsS http://127.0.0.1:8080/api/service/readiness; then echo; exit 0; fi
+          sleep 2
+        done
+        echo "::error::Greenmail not ready after 120 s (GREENMAIL_NOT_READY)"
+        exit 1

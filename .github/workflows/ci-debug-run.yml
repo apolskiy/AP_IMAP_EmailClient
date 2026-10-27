@@ -1,0 +1,64 @@
+# SPDX-FileCopyrightText: 2026 Aleksandr Polskiy
+# SPDX-License-Identifier: Apache-2.0
+# ci-debug-run (design §12): a manual run of chosen tests, outside project status. The uploaded
+# artifact holds the job's reports and the test broker's log (the run's window and that day's port
+# failures).
+name: ci-debug-run
+
+on:
+  workflow_dispatch:
+    inputs:
+      tests:
+        description: Tests to run, separated by spaces (case IDs, function names or node IDs)
+        type: string
+        default: ""
+      file:
+        description: Repository path of a file with one test name per line
+        type: string
+        default: ""
+      keyword:
+        description: Keyword or keyword prefix (e.g. READER_IMAP_)
+        type: string
+        default: ""
+      os:
+        description: Operating system
+        type: choice
+        default: ubuntu-latest
+        options: [ubuntu-latest, windows-latest]
+      workers:
+        description: Parallel workers
+        type: string
+        default: "1"
+
+permissions:
+  contents: read
+
+jobs:
+  ci-debug-run:
+    runs-on: ${{ inputs.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the harness command
+        id: command
+        shell: bash
+        env:
+          TESTS: ${{ inputs.tests }}
+          TEST_FILE: ${{ inputs.file }}
+          KEYWORD: ${{ inputs.keyword }}
+          WORKERS: ${{ inputs.workers }}
+        run: |
+          command="emi_harness.cli --priority debug --allure -n ${WORKERS:-1}"
+          for name in $TESTS; do command="$command --test $name"; done
+          [ -n "$TEST_FILE" ] && command="$command --file $TEST_FILE"
+          [ -n "$KEYWORD" ] && command="$command --keyword $KEYWORD"
+          if [ -z "$TESTS$TEST_FILE$KEYWORD" ]; then
+            echo "::error::give tests, a file or a keyword"; exit 4
+          fi
+          echo "command=$command" >> "$GITHUB_OUTPUT"
+          echo "$command"
+      - uses: ./.github/actions/harness-job
+        with:
+          command: ${{ steps.command.outputs.command }}
+          artifact: reports-debug-${{ github.run_id }}
+          password: ${{ secrets.EMI_GREENMAIL_PASSWORD || 'password' }}

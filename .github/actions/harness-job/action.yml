@@ -1,0 +1,92 @@
+# SPDX-FileCopyrightText: 2026 Aleksandr Polskiy
+# SPDX-License-Identifier: Apache-2.0
+# One functional job (design §12): Python 3.14 and the pinned requirements, Greenmail, the test broker,
+# then one harness command. Reports and the broker log are uploaded whatever the outcome. The command's
+# exit code is an output (0 passed, 1 failed, 2 aborted) and also decides the job's result.
+name: Harness job
+description: Set up Python, Greenmail and the test broker, run one harness command, upload reports and logs.
+inputs:
+  command:
+    description: Arguments after "python -m", e.g. "emi_harness.cli --priority P0 -n 4".
+    required: true
+  artifact:
+    description: Name of the uploaded reports artifact.
+    required: true
+  password:
+    description: Password of the Greenmail test user.
+    required: false
+    default: password
+outputs:
+  exit-code:
+    description: Exit code of the harness command.
+    value: ${{ steps.run.outputs.exit-code }}
+runs:
+  using: composite
+  steps:
+    - name: Set up Python 3.14
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.14"
+        cache: pip
+        cache-dependency-path: |
+          requirements.txt
+          requirements-dev.txt
+
+    - name: Install requirements
+      shell: bash
+      run: python -m pip install -r requirements.txt -r requirements-dev.txt
+
+    - name: Start Greenmail
+      uses: ./.github/actions/start-greenmail
+      with:
+        password: ${{ inputs.password }}
+
+    - name: Start the test broker
+      shell: bash
+      env:
+        EMI_IMAP_PASSWORD: ${{ inputs.password }}
+        EMI_SMTP_PASSWORD: ${{ inputs.password }}
+      run: python -m emi_test_broker start
+
+    - name: Run the harness
+      id: run
+      shell: bash
+      env:
+        EMI_IMAP_PASSWORD: ${{ inputs.password }}
+        EMI_SMTP_PASSWORD: ${{ inputs.password }}
+        HARNESS_COMMAND: ${{ inputs.command }}
+      run: |
+        set +e
+        python -m $HARNESS_COMMAND
+        code=$?
+        if [ "$code" = "5" ]; then
+          echo "::notice::no tests selected for: $HARNESS_COMMAND"
+          code=0
+        fi
+        echo "exit-code=$code" >> "$GITHUB_OUTPUT"
+
+    - name: Stop the test broker
+      if: always()
+      shell: bash
+      run: python -m emi_test_broker stop || true
+
+    - name: Upload reports and the broker log
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.artifact }}
+        path: |
+          reports/
+          logs/
+        if-no-files-found: warn
+
+    - name: Job result
+      shell: bash
+      run: |
+        code="${{ steps.run.outputs.exit-code }}"
+        case "$code" in
+          0) echo "job passed" ;;
+          1) echo "::error::job failed (exit 1)"; exit 1 ;;
+          2) echo "::error::job aborted (exit 2): later jobs of the chain do not run"; exit 2 ;;
+          *) echo "::error::harness exit code '$code'"; exit 1 ;;
+        esac

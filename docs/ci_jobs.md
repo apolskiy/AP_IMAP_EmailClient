@@ -4,9 +4,10 @@ SPDX-License-Identifier: Apache-2.0
 -->
 # CI Jobs: What Runs, When, and How
 
-> **Status: design.** The workflows and commands below are planned; they are not implemented yet.
-> Source of decisions: `docs/design/phase0_email_client_ambiguities.md` (AMB-15, AMB-26, AMB-44,
-> AMB-48, AMB-55, AMB-56, AMB-57).
+> Workflows: `.github/workflows/` (`main.yml`, `functional-chain.yml`, `unit-standalone.yml`,
+> `unit-tool.yml`, `ci-debug-run.yml`). Source of decisions: `docs/design/phase0_email_client_ambiguities.md`
+> (AMB-15, AMB-26, AMB-44, AMB-48, AMB-55, AMB-56, AMB-57, AMB-64). Not run on GitHub yet: the first push
+> with these files starts them.
 
 ## When CI runs
 
@@ -72,6 +73,18 @@ arrives in a folder the reader can open. If not, the job stops at once and every
 | `unit-emi-test-broker` | Automatically when `emi_test_broker/` or `unittests/emi_test_broker/` changes; also by hand | Test broker unit tests on their own. Never block. |
 | `unit-emi-greenmail` | Automatically when `emi_greenmail/` or `unittests/emi_greenmail/` changes; also by hand | Greenmail client unit tests on their own. Never block. |
 | `unit-emi-harness` | Automatically when `emi_harness/` or `unittests/emi_harness/` changes; also by hand | Harness unit tests on their own. Never block. |
+| `test-validity` (planned) | By hand and weekly | Proves the functional tests fail when a tool is broken (named faults) and pass when it works (repeat runs, timing margins); design §13.4. Never blocks. |
+
+The standalone unit jobs run on Windows and Ubuntu. A manual run of `unit-standalone` offers one tool or
+all of them.
+
+**Allure on GitHub Pages:** after a run on `main`, the `quality-gate` job builds one Allure report from
+both operating systems' results, and `allure-pages` publishes it. Turn this on once under *Settings →
+Pages → Source: GitHub Actions*. Until then `allure-pages` fails without affecting project status, and
+the report is still available as the `allure-report` artifact of every run.
+
+**Greenmail password:** optional repository secret `EMI_GREENMAIL_PASSWORD`. Without it the workflows
+use Greenmail's public test password `password`.
 
 ## Running the same jobs locally (CLI)
 

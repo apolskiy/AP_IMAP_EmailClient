@@ -546,8 +546,9 @@ User-facing details: `docs/ci_jobs.md`. Rule source: `.claude/rules/framework-ru
 * **Functional job steps**: checkout → `actions/setup-python` (3.14) → `pip install -r requirements.txt
   -r requirements-dev.txt` → start Greenmail → readiness poll → start `emi_test_broker` → session setup
   and probe email (§9.6) → `python -m emi_harness.cli --priority <slice>` → upload reports and the broker log.
-* **Greenmail per OS**: Ubuntu runs `greenmail/standalone:2.1.15` as a `services:` container (same
-  options as the README). GitHub's Windows runners cannot run Linux containers, so Windows runs the
+* **Greenmail per OS** (`.github/actions/start-greenmail`): Ubuntu starts `greenmail/standalone:2.1.15`
+  with `docker run`, using the README's options. That way one composite action serves both OSes; a
+  `services:` container cannot exist on a Windows job. GitHub's Windows runners cannot run Linux containers, so Windows runs the
   `greenmail-standalone-2.1.15.jar` (cached) on Temurin 17 via `actions/setup-java`, in the background.
   Reason for Windows functional CI: Java is needed anyway (Allure's report generator) and ships with the
   runners, and the behaviour that differs most on Windows (broker detached auto-start, port binding,
@@ -559,8 +560,18 @@ User-facing details: `docs/ci_jobs.md`. Rule source: `.claude/rules/framework-ru
   unit-test folder and by hand; they never block.
 * **Overlapping runs**: PR / feature-branch runs cancel the older run of the same branch; `main` and
   manual runs are never cancelled and may run in parallel; a job using a shared real mailbox queues.
-* **Workflow files** (planned): `.github/workflows/main.yml` (pipeline), `ci-debug-run.yml`,
-  `unit-standalone.yml` (one job per tool with `paths` filters).
+* **Test validity** (§13.4, AMB-64): `test-validity` (manual and weekly, Ubuntu) runs the named-fault
+  and stability checks; it never blocks.
+* **Workflow files**: `.github/workflows/main.yml` (pipeline), `functional-chain.yml` (the P0 → P1 →
+  P2–P4 chain, called once per OS), `ci-debug-run.yml`, `unit-standalone.yml` (a `changes` job lists the
+  tools whose folders changed; each tool's job calls `unit-tool.yml`), `test-validity.yml`. Shared steps
+  are composite actions: `.github/actions/harness-job` (Python, requirements, Greenmail, broker, one
+  harness command, uploads; its exit code tells the chain an abort from failures) and `start-greenmail`.
+* **Allure on GitHub Pages**: after a run on `main`, `quality-gate` builds one Allure report from both OSes
+  and `allure-pages` deploys it. This needs Pages set to "GitHub Actions" in the repository settings;
+  until then that job fails without affecting project status.
+* **Secrets**: `EMI_GREENMAIL_PASSWORD` (optional) sets the Greenmail user's password; without it the
+  public test password `password` is used.
 
 ## 13. Test Strategy
 
@@ -597,6 +608,57 @@ or the circuit breaker.
   recipient mismatch via `sub`.
 * **Scale**: parametrized families (kinds × fields × distributions × orders × transports) reach
   **1,000+** test cases with unique IDs in 400000–599999, P0 + P1 within 20%.
+
+### 13.4 Test validity (AMB-64)
+A test is only worth its result if it fails when the tool is broken (no **false positive**) and passes when
+the tool works (no **false negative**). Three checks show this for the functional suite.
+
+**1. Named faults (false positives).** `emi_harness/faults.py` holds a catalog of faults. A fault is a
+`MailBackend` wrapper given to `EmiApi` through its `backend` argument, so the tools' own code has no fault
+flags. It is selected with `--emi-fault <name>` (`EMI_FAULT`), works in both client modes, and is
+recorded in `settings.json` and in every results line. Each fault names the tests that must catch it
+and the keyword they must fail with:
+
+| Fault | What breaks | Must be caught by | Expected keyword |
+|---|---|---|---|
+| `sender-drops-email` | `send` delivers one email fewer than asked; the manifest still lists them all | delivery 400001–400004, counts exceeded, arrival during the wait | `CASE_EMAIL_NOT_RECEIVED`; counts exceeded: `CASE_VERIFICATION_FAILED` (the expected error is not raised) |
+| `sender-ignores-field` | a batch puts the address in `To`, whatever field was asked | counts and batches in `Cc` / `Bcc`; fields not matched (`cc` / `bcc` sent) | `CASE_EMAIL_NOT_RECEIVED`; fields: `CASE_VERIFICATION_FAILED` |
+| `reader-any-field` | a wait matches the address in every recipient field, whatever `match_fields` says | fields not matched | `CASE_VERIFICATION_FAILED` |
+| `reader-ignores-markers` | a wait drops its test and run markers | other run's marker not matched | `CASE_VERIFICATION_FAILED` |
+| `reader-slot-collapse` | a wait for a slot address `<run>-rNN` reads slot 0 instead | batches over 5 or 10 addresses; isolation (own extra slot) | `CASE_EMAIL_NOT_RECEIVED`, `CASE_EMAIL_COUNT_EXCEEDED` or `CASE_VERIFICATION_FAILED` |
+| `reader-duplicates-email` | a wait returns one email twice in place of another (same count) | counts of 2 or more, batches, delivery 400004 | `CASE_VERIFICATION_FAILED` |
+| `reader-returns-extra` | a wait returns one email more than asked | counts, batches | `CASE_VERIFICATION_FAILED` |
+| `reader-wrong-link` | the link returned differs from the email's link in one character | delivery 400001–400004, counts | `CASE_VERIFICATION_FAILED` |
+| `reader-gives-up-early` | a wait gives up after 1 s, whatever its timeout | arrival during the wait (2 s or later) | `CASE_EMAIL_NOT_RECEIVED` |
+
+`python -m emi_harness.validity faults [--fault <name>]` runs each fault's catching tests under that fault
+and checks that every one of them **fails with an expected keyword**. A catching test that passes, is
+skipped, or fails with another keyword is a **gap**: the report names the fault, the test, its status and
+keyword; the command exits 1. Gaps are fixed in the tests (a missing check), never by weakening the fault.
+The catalog grows with the suite: a new functional family adds the faults it catches.
+
+**2. Stability (false negatives).** `python -m emi_harness.validity stability --repeat N` (default 3) runs a
+selection (`--test`, `--file`, `--keyword`, `--priority`, `-n`) N times against a healthy Greenmail, each
+repeat with its own run ID. A test that does not pass in every repeat is listed as **flaky** (it passed
+in some repeats) or **failing** (in none), with its keywords per repeat. **Timing margins**: a test whose
+longest duration over the repeats is above 80% of its test limit, or a step above 80% of its step
+limit, is listed as a **thin margin**, so a limit too close to reality is found before it fails at random.
+Exit 1 when anything is listed.
+
+**3. No test passes by checking nothing.** The harness counts every `step.verify` and every passing plain
+`assert` (pytest's `enable_assertion_pass_hook`). A functional test that would pass with a count of 0
+fails with **`CASE_NO_VERIFICATION`**, in every run, not only validity runs. `pytest.raises` alone does not
+count: the test states what it checked about the error with `step.verify`. A `pytest.raises` that is not
+satisfied (pytest's `Failed`, "DID NOT RAISE") is a failed check, `CASE_VERIFICATION_FAILED`.
+
+**Guards and outputs.** Results produced under a fault are never gate results: `emi_harness.gate` refuses
+them (exit 2). Reports go to `reports/<run>/validity/` (`faults.json` or `stability.json`, plus each
+underlying job's usual reports). **Where**: locally, and in the non-blocking workflow `test-validity.yml`
+(manual, with a choice of check, fault and selection; weekly on a schedule; Ubuntu with Greenmail as a
+service container). It never affects project status.
+
+**Scope.** These checks cover the functional suite. Unit tests use Sims whose faults are asserted
+directly (§13.2), and are checked by review.
 
 ## 14. Dependencies and Project Files (AMB-21, AMB-43)
 

@@ -1,0 +1,42 @@
+# SPDX-FileCopyrightText: 2026 Aleksandr Polskiy
+# SPDX-License-Identifier: Apache-2.0
+# One tool's unit tests on Windows and Ubuntu; called by unit-standalone.yml.
+name: unit-tool
+
+on:
+  workflow_call:
+    inputs:
+      tool:
+        description: Tool folder, e.g. emi_reader.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+      - run: python -m pip install -r requirements.txt -r requirements-dev.txt
+      - name: ${{ inputs.tool }} unit tests
+        run: python -m pytest unittests/${{ inputs.tool }} -p no:cacheprovider --junitxml=reports/unit/junit.xml
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-${{ inputs.tool }}-${{ runner.os }}
+          path: reports/unit/
+          if-no-files-found: warn

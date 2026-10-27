@@ -1,0 +1,163 @@
+# SPDX-FileCopyrightText: 2026 Aleksandr Polskiy
+# SPDX-License-Identifier: Apache-2.0
+# Main pipeline: decides project status (design §12, docs/ci_jobs.md).
+# lint -> unit (Windows + Ubuntu) -> functional chain per OS (P0 -> P1 -> P2-P4) -> quality-gate.
+name: main
+
+on:
+  push:
+    paths:
+      - "emi_*/**"
+      - "tests/**"
+      - "unittests/**"
+      - "conftest.py"
+      - "requirements*.txt"
+      - "pyproject.toml"
+      - ".pylintrc"
+      - ".github/**"
+  pull_request:
+    branches: [main]
+    paths:
+      - "emi_*/**"
+      - "tests/**"
+      - "unittests/**"
+      - "conftest.py"
+      - "requirements*.txt"
+      - "pyproject.toml"
+      - ".pylintrc"
+      - ".github/**"
+  workflow_dispatch:
+
+# A pull request or feature-branch push cancels the older run of the same ref. Runs on main and manual
+# runs get a group of their own (the run ID), so they are never cancelled and may run in parallel.
+concurrency:
+  group: >-
+    main-${{ (github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main')
+    && github.run_id || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+      - run: python -m pip install -r requirements.txt -r requirements-dev.txt
+      - name: pylint 10.00/10
+        run: >
+          python -m pylint --rcfile=.pylintrc --fail-under=10.0
+          emi_reader emi_sender emi_test_broker emi_greenmail emi_api emi_harness tests unittests conftest.py
+
+  unit:
+    needs: lint
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+      - run: python -m pip install -r requirements.txt -r requirements-dev.txt
+      - name: Every unit-test folder
+        run: python -m pytest unittests -p no:cacheprovider --junitxml=reports/unit/junit.xml
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-${{ runner.os }}
+          path: reports/unit/
+          if-no-files-found: warn
+
+  functional-ubuntu:
+    needs: unit
+    uses: ./.github/workflows/functional-chain.yml
+    with:
+      os: ubuntu-latest
+      label: ubuntu
+    secrets: inherit
+
+  functional-windows:
+    needs: unit
+    uses: ./.github/workflows/functional-chain.yml
+    with:
+      os: windows-latest
+      label: windows
+    secrets: inherit
+
+  quality-gate:
+    needs: [unit, functional-ubuntu, functional-windows]
+    if: ${{ !cancelled() && needs.unit.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+      - run: python -m pip install -r requirements.txt -r requirements-dev.txt
+      - name: Download both operating systems' reports
+        uses: actions/download-artifact@v4
+        with:
+          pattern: reports-*
+          path: all-reports
+      - name: Quality gates over both operating systems
+        run: python -m emi_harness.gate all-reports
+      - name: Build the Allure report once, from both operating systems
+        if: always()
+        env:
+          ALLURE_VERSION: "2.30.0"
+        run: |
+          shopt -s nullglob
+          results=(all-reports/*/reports/*/*/allure-results)
+          if [ ${#results[@]} -eq 0 ]; then echo "no Allure results"; exit 0; fi
+          curl -fsSL -o allure.tgz "https://github.com/allure-framework/allure2/releases/download/${ALLURE_VERSION}/allure-${ALLURE_VERSION}.tgz"
+          tar -xzf allure.tgz
+          "./allure-${ALLURE_VERSION}/bin/allure" generate "${results[@]}" -o allure-report --clean
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-report
+          path: allure-report/
+          if-no-files-found: ignore
+      - if: ${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/main' && hashFiles('allure-report/index.html') != '' }}
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: allure-report/
+
+  # Publishes the Allure report to GitHub Pages after a run on main. Needs Pages enabled with
+  # "GitHub Actions" as the source; until then this job fails without affecting project status.
+  allure-pages:
+    needs: quality-gate
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4
