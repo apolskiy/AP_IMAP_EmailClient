@@ -56,11 +56,14 @@ runs:
           New-Item -ItemType Directory -Force $folder | Out-Null
           Invoke-WebRequest "https://repo1.maven.org/maven2/com/icegreen/greenmail-standalone/$env:GREENMAIL_VERSION/greenmail-standalone-$env:GREENMAIL_VERSION.jar" -OutFile $jar
         }
+        Write-Output "JAR: $jar ($((Get-Item $jar).Length) bytes)"
+        & java -version
         $arguments = @("-Dgreenmail.setup.test.all", "-Dgreenmail.hostname=127.0.0.1",
-                       "-Dgreenmail.users=qa:$env:GREENMAIL_PASSWORD@example.com", "-jar", $jar)
-        Start-Process java -ArgumentList $arguments -WindowStyle Hidden `
+                       "-Dgreenmail.users=qa:$env:GREENMAIL_PASSWORD@example.com", "-jar", "`"$jar`"")
+        $process = Start-Process java -ArgumentList $arguments -WindowStyle Hidden -PassThru `
           -RedirectStandardOutput (Join-Path $folder "greenmail.out.log") `
           -RedirectStandardError (Join-Path $folder "greenmail.err.log")
+        Write-Output "Greenmail started as process $($process.Id)"
 
     - name: Wait for Greenmail readiness
       shell: bash
@@ -71,3 +74,19 @@ runs:
         done
         echo "::error::Greenmail not ready after 120 s (GREENMAIL_NOT_READY)"
         exit 1
+
+    - name: Show Greenmail's output (Windows, when not ready)
+      if: failure() && runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        $folder = Join-Path $env:RUNNER_TEMP "greenmail"
+        Get-Process java -ErrorAction SilentlyContinue | Format-Table Id, StartTime, HasExited -AutoSize
+        foreach ($name in "greenmail.out.log", "greenmail.err.log") {
+          Write-Output "----- $name"
+          Get-Content (Join-Path $folder $name) -ErrorAction SilentlyContinue | Select-Object -Last 60
+        }
+
+    - name: Show Greenmail's output (Linux, when not ready)
+      if: failure() && runner.os == 'Linux'
+      shell: bash
+      run: docker logs --tail 60 greenmail_server || true
