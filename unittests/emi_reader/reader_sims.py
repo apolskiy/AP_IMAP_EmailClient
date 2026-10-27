@@ -4,6 +4,7 @@
 
 import base64
 import json
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from email.message import EmailMessage
 from pathlib import Path
@@ -82,6 +83,17 @@ def make_email(  # pylint: disable=too-many-arguments
     return message.as_bytes()
 
 
+def _matches(tokens: list[str], addresses_in: Callable[[tuple[str, ...]], tuple[str, ...]]) -> bool:
+    """Evaluate one search key (consumed from ``tokens``): ``OR a b``, ``HEADER name "x"`` or ``TO "x"``."""
+    head = tokens.pop(0)
+    if head == "OR":
+        first = _matches(tokens, addresses_in)
+        second = _matches(tokens, addresses_in)
+        return first or second
+    field_name = tokens.pop(0) if head == "HEADER" else head
+    return tokens.pop(0).strip('"').lower() in addresses_in((field_name.lower(),))
+
+
 @dataclass
 class SimFolder:
     """One folder of the simulated server."""
@@ -114,6 +126,7 @@ class SimImap:
         self.failures: dict[str, list[Exception]] = {}
         self.arrivals: list[tuple[float, str, bytes]] = []
         self.calls: list[str] = []
+        self.searches: list[tuple[str, ...]] = []
         self.opens = 0
         self.unlisted: set[str] = set()
         self._clock = clock
@@ -175,11 +188,13 @@ class SimImap:
         return FolderStatus(len(entry.messages), entry.uidnext, entry.uidvalidity)
 
     def uid_search(self, criteria: tuple[str, ...]) -> list[int]:
-        """Support ``UID n:*``, exact recipient searches and the two combined (``UID n:* TO "a"``).
+        """Support ``UID n:*``, exact recipient searches, ``OR`` of them (the shared poller's search) and a
+        range combined with either (``UID n:* OR TO "a" CC "b"``).
 
         Like a real server, ``n:*`` with ``n`` above every UID still matches the highest UID (RFC 3501).
         """
         self._enter("uid_search")
+        self.searches.append(criteria)
         messages = self.folders[self._selected or "INBOX"].messages
         uids = sorted(messages)
         if criteria[0] == "UID":
@@ -188,9 +203,7 @@ class SimImap:
             criteria = criteria[2:]
         if not criteria:
             return uids
-        field_name = criteria[1] if criteria[0] == "HEADER" else criteria[0]
-        address = criteria[-1].strip('"').lower()
-        return [uid for uid in uids if address in parse_email(messages[uid]).addresses_in((field_name.lower(),))]
+        return [uid for uid in uids if _matches(list(criteria), parse_email(messages[uid]).addresses_in)]
 
     def fetch_headers(self, uids: list[int]) -> dict[int, bytes]:
         """Return header blocks."""

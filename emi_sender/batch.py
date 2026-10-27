@@ -8,7 +8,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 
-from emi_sender.compose import Field, Kind, validate_address
+from emi_sender.compose import Field, Fields, Kind, parse_fields, validate_address
 from emi_sender.errors import InvalidInputError
 from emi_sender.keywords import SenderCaseKeyword, SenderKeyword
 
@@ -47,13 +47,13 @@ class PlannedEmail:
         index: Position in the send order.
         address: Recipient.
         kind: Email kind.
-        field: Recipient field carrying the address.
+        field: Recipient field, or fields, carrying the address.
     """
 
     index: int
     address: str
     kind: Kind
-    field: Field
+    field: Fields
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -67,7 +67,8 @@ class BatchRequest:  # pylint: disable=too-many-instance-attributes
         explicit: Per-address counts per kind, overriding the preset.
         order: ``fixed`` or ``random``.
         seed: Seed for every random choice; generated and logged when ``None``.
-        recipient_field: Recipient field for every email.
+        recipient_field: Recipient field for every email, or a combination such as ``(Field.TO, Field.CC)``
+            (AMB-82).
         concurrency: Parallel SMTP connections (1-32).
         jitter_ms: Random delay between sends, 0..jitter_ms.
     """
@@ -78,7 +79,7 @@ class BatchRequest:  # pylint: disable=too-many-instance-attributes
     explicit: Mapping[str, Mapping[str, object]] | None = None
     order: Order = Order.FIXED
     seed: int | None = None
-    recipient_field: Field = Field.TO
+    recipient_field: Fields = Field.TO
     concurrency: int = 1
     jitter_ms: int = 0
 
@@ -198,6 +199,7 @@ def plan_batch(request: BatchRequest) -> BatchPlan:
     """
     _check_range("concurrency", request.concurrency, 1, MAX_CONCURRENCY)
     _check_range("jitter_ms", request.jitter_ms, 0, 60_000)
+    fields = parse_fields(request.recipient_field)
     addresses = [validate_address(address) for address in request.addresses]
     if not 1 <= len(addresses) <= MAX_ADDRESSES:
         raise _invalid(f"1-{MAX_ADDRESSES} addresses required, got {len(addresses)}", field="addresses")
@@ -217,7 +219,7 @@ def plan_batch(request: BatchRequest) -> BatchPlan:
         raise _invalid(f"at most {MAX_TOTAL} emails per batch, got {len(pairs)}", field="counts")
     if request.order is Order.RANDOM:
         rng.shuffle(pairs)
-    emails = tuple(PlannedEmail(index, address, kind, request.recipient_field)
+    emails = tuple(PlannedEmail(index, address, kind, fields)
                    for index, (address, kind) in enumerate(pairs))
     _LOGGER.info("batch plan: %d emails, seed=%d, order=%s, preset=%s", len(emails), seed,
                  request.order, request.preset)

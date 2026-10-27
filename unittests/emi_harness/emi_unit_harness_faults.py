@@ -56,7 +56,8 @@ class SimBackend:
 def _wait_options(**changes: Any) -> dict[str, Any]:
     """The options of one ``wait_for_emails`` call as the API passes them."""
     options: dict[str, Any] = {"cta": Cta.ACTIVATE_ACCOUNT, "count": 2, "timeout": 60.0, "test_id": "C400001",
-                               "run_id": "run", "match_fields": ("cc",), "settle_window": 0.0}
+                               "run_id": "run", "match_fields": ("cc",), "settle_window": 0.0,
+                               "expected_folder": None}
     options.update(changes)
     return options
 

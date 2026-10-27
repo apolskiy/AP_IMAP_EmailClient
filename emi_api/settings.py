@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 Aleksandr Polskiy
 # SPDX-License-Identifier: Apache-2.0
-"""Settings of the central API: one object for every tool (design §3, §8.2)."""
+"""Settings of the central API: one object for every tool, and its option table (design §3, §8.2)."""
 
 import os
 from collections.abc import Mapping
@@ -8,10 +8,14 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
+from emi_config import Option, Resolved, merge, resolve
 from emi_greenmail import GreenmailSettings
+from emi_greenmail.settings import OPTIONS as GREENMAIL_OPTIONS
 from emi_reader import ImapSettings
 from emi_sender import SenderSettings
-from emi_test_broker import BrokerSettings, settings_from_env
+from emi_test_broker import BrokerSettings
+from emi_test_broker.settings import OPTIONS as BROKER_OPTIONS
+from emi_test_broker.settings import broker_settings_from
 
 
 class ClientMode(StrEnum):
@@ -76,6 +80,30 @@ class EmiSettings:
                 "broker": self.broker.describe(), "greenmail": self.greenmail_settings.describe()}
 
     @classmethod
+    def from_options(cls, resolved: Resolved, **overrides: Any) -> "EmiSettings":
+        """The settings a resolved table describes.
+
+        Args:
+            resolved: Values of a table that includes :data:`OPTIONS`.
+            **overrides: Explicit field values, which win; None values are ignored.
+
+        Returns:
+            The settings.
+
+        Raises:
+            ValueError: If a value or combination is invalid.
+        """
+        broker = broker_settings_from(resolved)
+        greenmail = GreenmailSettings(host=resolved["greenmail_host"] or broker.imap.host,
+                                      api_port=resolved["greenmail_api_port"],
+                                      probe_ports={"smtp": broker.smtp.effective_smtp_port,
+                                                   "imap": broker.imap.effective_port})
+        values: dict[str, Any] = {"mode": ClientMode(resolved["client_mode"]), "broker": broker,
+                                  "greenmail": greenmail, "wait_timeout": resolved["wait_timeout"]}
+        values.update({key: value for key, value in overrides.items() if value is not None})
+        return cls(**values)
+
+    @classmethod
     def from_env(cls, environ: Mapping[str, str] | None = None, **overrides: Any) -> "EmiSettings":
         """Build settings from ``EMI_*`` variables (``.env`` already loaded by the caller).
 
@@ -89,9 +117,13 @@ class EmiSettings:
         Raises:
             ValueError: If a value is out of range.
         """
-        source = environ if environ is not None else os.environ
-        values: dict[str, Any] = {"broker": settings_from_env(source)}
-        if source.get("EMI_CLIENT_MODE"):
-            values["mode"] = ClientMode(source["EMI_CLIENT_MODE"].strip().lower())
-        values.update({key: value for key, value in overrides.items() if value is not None})
-        return cls(**values)
+        return cls.from_options(resolve(OPTIONS, environ=environ if environ is not None else os.environ),
+                                **overrides)
+
+
+OPTIONS: tuple[Option, ...] = merge(BROKER_OPTIONS, GREENMAIL_OPTIONS, (
+    Option(name="client_mode", env="EMI_CLIENT_MODE", kind="choice", default="service",
+           choices=("service", "inprocess"), help="send and wait through the test broker or in this process"),
+    Option(name="wait_timeout", env="EMI_WAIT_TIMEOUT", kind="float", default=60.0, minimum=1, maximum=3600,
+           help="default seconds a wait for an email may take"),
+))

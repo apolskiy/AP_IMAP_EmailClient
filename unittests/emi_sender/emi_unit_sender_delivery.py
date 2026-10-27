@@ -5,12 +5,17 @@
 import smtplib
 import socket
 import ssl
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
-from emi_sender import BatchRequest, Marker, Preset, Sender, SenderKeyword, SenderSettings
+from emi_sender import BatchRequest, Manifest, ManifestEntry, Marker, Preset, Sender, SenderKeyword, SenderSettings
 from emi_sender.cli import main
 from emi_sender.delivery import classify_connect, classify_send
+from emi_test_broker import TestBrokerKeyword
+from emi_test_broker.errors import BrokerUnavailableError
 from unittests.emi_sender.sender_sims import SimOutbox, dropped, refused, rejected
 from unittests.sims import SimClock
 
@@ -166,3 +171,40 @@ class TestEMISenderCli:
         outbox = SimOutbox()
         outbox.script = [refused()]
         assert main(["--to", _ADDRESS, "--activation", "1"], sender=_sender(outbox)) == 3
+
+    def EMI_SENDER_UNIT_110070_via_broker_sends_through_the_broker(self) -> None:
+        """``--via-broker`` hands the batch to the broker client; without it the sender delivers itself
+        (AMB-84). A broker error is exit 3, like an unreachable server."""
+        outbox, broker = SimOutbox(), SimBroker()
+        assert main(["--to", _ADDRESS, "--activation", "1", "--via-broker"], sender=_sender(outbox),
+                    broker=broker) == 0
+        assert len(broker.batches) == 1 and not outbox.delivered
+        assert main(["--to", _ADDRESS, "--activation", "1"], sender=_sender(outbox), broker=broker) == 0
+        assert len(broker.batches) == 1 and outbox.delivered
+        broker.error = BrokerUnavailableError("no broker", TestBrokerKeyword.UNAVAILABLE, infrastructure=True)
+        assert main(["--to", _ADDRESS, "--activation", "1", "--via-broker"], broker=broker) == 3
+
+    def EMI_SENDER_UNIT_110071_sender_runs_without_the_broker(self) -> None:
+        """Importing and running the sender CLI without ``--via-broker`` never imports the broker package."""
+        program = "import sys, emi_sender.cli; print(any(name.startswith('emi_test_broker') for name in sys.modules))"
+        result = subprocess.run([sys.executable, "-c", program], capture_output=True, text=True, check=True,
+                                cwd=Path(__file__).resolve().parents[2], timeout=60)
+        assert result.stdout.strip() == "False"
+
+
+class SimBroker:  # pylint: disable=too-few-public-methods
+    """Broker client double: records batches or raises a scripted error."""
+
+    def __init__(self) -> None:
+        """Nothing sent yet."""
+        self.batches: list[BatchRequest] = []
+        self.error: Exception | None = None
+
+    def send_batch(self, request: BatchRequest, *, marker: Marker | None = None) -> Manifest:
+        """Record the batch and report every email sent."""
+        del marker
+        if self.error is not None:
+            raise self.error
+        self.batches.append(request)
+        return Manifest(entries=[ManifestEntry(index=0, address=_ADDRESS, field="to", kind="activation",
+                                               status="sent")], seed=1)

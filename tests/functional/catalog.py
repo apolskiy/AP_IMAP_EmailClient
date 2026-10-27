@@ -16,6 +16,8 @@ Block              Family                                       Cases
 401000-401089      counts per kind and field (``emi_func_counts``)  90
 401500-401508      count exceeded (``emi_func_counts``)           9
 402000-402008      recipient fields not matched (``emi_func_fields``)  9
+402100-402111      field combinations (``emi_func_fields``)      12
+402200-402202      Delivered-To alone (``emi_func_fields``)       3
 403000-403014      markers (``emi_func_markers``)                 15
 404000-404014      arrival during the wait (``emi_func_timing``)  15
 406000-406008      isolation (``emi_func_isolation``)             9

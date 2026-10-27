@@ -15,7 +15,8 @@ from emi_api.keywords import ApiKeyword
 from emi_greenmail import GreenmailKeyword
 from emi_harness import CaseSkip, HarnessKeyword, Status, StepRecord, TestOutcome
 from emi_harness.keywords import CaseKeyword, JobKeyword
-from emi_harness.options import OPTIONS, Source, add_arguments, add_pytest_options, pass_through, resolve
+from emi_harness.options import (OPTIONS, PREFIX, Source, add_arguments, add_pytest_options, api_settings,
+                                 pass_through, resolve)
 from emi_harness.results import ResultsWriter, calibrate, job_dir, load_results, run_folder
 from emi_harness.session import PROBE_CASE, check_health, send_probe
 from emi_reader import EmailWaitError, ReaderCaseKeyword, ReaderKeyword
@@ -67,9 +68,9 @@ class TestEMIHarnessOptions:
                      if flag.startswith("--emi-")}
         pytest_flags: set[str] = set()
         add_pytest_options(lambda flag, **_kwargs: pytest_flags.add(flag))
-        expected = {option.flag for option in OPTIONS if not option.secret}
+        expected = {option.flag(PREFIX) for option in OPTIONS if not option.secret}
         assert cli_flags == pytest_flags == expected
-        assert not {option.flag for option in OPTIONS if option.secret} & cli_flags
+        assert not {option.flag(PREFIX) for option in OPTIONS if option.secret} & cli_flags
 
     def EMI_HARNESS_UNIT_200064_pass_through(self) -> None:
         """Given --emi-* flags are passed to pytest unchanged; absent ones are not invented."""
@@ -78,13 +79,13 @@ class TestEMIHarnessOptions:
 
     def EMI_HARNESS_UNIT_200065_settings_built(self) -> None:
         """The options become API settings: mode, folders, ports, SMTP login only with a set password."""
-        settings: EmiSettings = resolve(environ={"EMI_CLIENT_MODE": "inprocess", "EMI_IMAP_FOLDERS": "INBOX, Spam",
-                                                 "EMI_IMAP_PORT": "4143", "EMI_TEST_BROKER_PORT": "9025",
-                                                 "EMI_SMTP_PASSWORD": "pw"}).emi_settings()
+        settings: EmiSettings = api_settings(resolve(environ={
+            "EMI_CLIENT_MODE": "inprocess", "EMI_IMAP_FOLDERS": "INBOX, Spam", "EMI_IMAP_PORT": "4143",
+            "EMI_TEST_BROKER_PORT": "9025", "EMI_SMTP_PASSWORD": "pw"}))
         assert str(settings.mode) == "inprocess" and settings.imap.folders == ("INBOX", "Spam")
         assert settings.broker.port == 9025 and settings.smtp.smtp_login
         assert settings.greenmail_settings.probe_ports["imap"] == 4143
-        assert not resolve().emi_settings().smtp.smtp_login
+        assert not api_settings(resolve()).smtp.smtp_login
 
 
 class TestEMIHarnessResults:

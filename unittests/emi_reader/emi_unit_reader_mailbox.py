@@ -20,7 +20,7 @@ from emi_reader import (
     parse_email,
 )
 from emi_reader.inventory import ACTIVATION, INVITATION, NO_LINKS, UNCLASSIFIED, classify
-from unittests.emi_reader.reader_sims import SimImap, make_email
+from unittests.emi_reader.reader_sims import SimFolder, SimImap, make_email
 from unittests.sims import SimClock
 
 _ADDRESS = "qa+400001_20261026t153012-w01-a1b2@example.com"
@@ -392,6 +392,24 @@ class TestEMIReaderNetworkFaults:
         assert caught.value.primary == ReaderKeyword.MAILBOX_NONE_ACCESSIBLE
         assert caught.value.infrastructure is True
         assert {row["state"] for row in mailbox.access_matrix} == {"select_denied", "not_listed"}
+
+    def EMI_READER_UNIT_100144_unreadable_expected_folder_ends_the_wait(self) -> None:
+        """A wait that names an unreadable folder ends at once with the expected-folder keyword, although
+        another folder is readable and holds the email; the same wait without it succeeds, and a folder that
+        is not configured is invalid input (AMB-85)."""
+        clock = SimClock()
+        server = SimImap(clock)
+        server.deliver("INBOX", make_email(to_addr=_ADDRESS))
+        server.folders["Spam"] = SimFolder(selectable=False)
+        mailbox = _mailbox(server, clock, folders=("INBOX", "Spam"))
+        with pytest.raises(MailboxAccessError) as caught:
+            mailbox.wait_for_link(_ADDRESS, Cta.ACTIVATE_ACCOUNT, timeout=10.0, expected_folder="Spam")
+        assert caught.value.primary == ReaderKeyword.MAILBOX_EXPECTED_FOLDER_INACCESSIBLE
+        assert caught.value.infrastructure is True and caught.value.details["folder"] == "Spam"
+        assert clock.now() < 10.0
+        assert mailbox.wait_for_link(_ADDRESS, Cta.ACTIVATE_ACCOUNT, timeout=10.0, expected_folder="INBOX")
+        with pytest.raises(ValueError):
+            mailbox.wait_for_emails(_ADDRESS, timeout=1.0, expected_folder="Junk")
 
     @pytest.mark.network
     def EMI_READER_UNIT_100092_outage_until_deadline_reports_network_keyword(self) -> None:

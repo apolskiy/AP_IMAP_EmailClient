@@ -1,9 +1,18 @@
 # SPDX-FileCopyrightText: 2026 Aleksandr Polskiy
 # SPDX-License-Identifier: Apache-2.0
-"""Where the Greenmail client finds the server (design §3, §8.1)."""
+"""Where the Greenmail client finds the server, and its option rows (design §3, §8.1, AMB-81)."""
 
 from dataclasses import dataclass, field
 from typing import Any
+
+from emi_config import Option
+
+OPTIONS: tuple[Option, ...] = (
+    Option(name="greenmail_host", env="EMI_GREENMAIL_HOST", kind="str", default="",
+           help="Greenmail host (default: the IMAP host)"),
+    Option(name="greenmail_api_port", env="EMI_GREENMAIL_API_PORT", kind="int", default=8080, minimum=1,
+           maximum=65535, help="Greenmail REST API port"),
+)
 
 
 @dataclass(frozen=True, kw_only=True)

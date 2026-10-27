@@ -22,7 +22,8 @@ from typing import Any
 
 import pytest
 
-from emi_api import ClientMode, EmiApi, EmiRun, RunId, default_backend, marker_for, worker_number
+from emi_api import (ClientMode, EmiApi, EmiError, EmiRun, RunId, default_backend, keywords_of, marker_for,
+                     worker_number)
 from emi_api import case_id as testrail_case
 from emi_harness.allure_report import priority_marks, record_outcome, write_categories
 from emi_harness.dependencies import DependencyTracker, dependency_groups, misplaced_parents, order_tests
@@ -32,7 +33,7 @@ from emi_harness.faults import NO_FAULT, apply_fault
 from emi_harness.inventory_log import InventoryLog
 from emi_harness.jobs import JobController, StopDecision
 from emi_harness.keywords import CaseKeyword, HarnessKeyword
-from emi_harness.options import Resolved, add_pytest_options, cli_values, read_dotenv, resolve
+from emi_harness.options import Resolved, add_pytest_options, cli_values, api_settings, read_dotenv, resolve
 from emi_harness.outcomes import CaseSkip, Status, TestOutcome, Verdict, classify
 from emi_harness.priorities import Job, Planned, parse_priority, plan_priorities
 from emi_harness.results import ResultsWriter, calibrate, job_dir, latest_run, load_results
@@ -120,7 +121,7 @@ def pytest_configure(config: pytest.Config) -> None:
     resolved, error = None, ""
     try:
         resolved = resolve(cli_values(config.option), os.environ, read_dotenv(Path(config.rootpath) / ".env"))
-        resolved.emi_settings()
+        api_settings(resolved)
     except ValueError as problem:
         resolved, error = None, str(problem)
     base = (resolved["run_id"] if resolved else "") or os.environ.get("EMI_RUN_ID", "") or str(RunId.new(0))
@@ -319,7 +320,7 @@ def _api(pytestconfig: pytest.Config) -> Iterator[EmiApi]:
     state = pytestconfig.stash[_STATE]
     if state.resolved is None:
         raise pytest.UsageError(f"invalid EMI option: {state.error}")
-    settings = state.resolved.emi_settings()
+    settings = api_settings(state.resolved)
     backend = apply_fault(state.resolved["fault"], default_backend(settings))  # unchanged unless --emi-fault
     api = EmiApi(settings, run_id=state.run_id, backend=backend)
     api.observe(_observer(state))
@@ -392,7 +393,7 @@ def _failure_evidence(item: pytest.Item, info: ItemInfo, state: HarnessState) ->
     api, run = funcargs.get("api"), funcargs.get("emi_run")
     if not isinstance(api, EmiApi) or not isinstance(run, EmiRun):
         return
-    settings = state.resolved.emi_settings() if state.resolved else None
+    settings = api_settings(state.resolved) if state.resolved else None
     service = settings is not None and settings.mode is ClientMode.SERVICE
     collect(info.evidence, fetch=api.reader.emails_to, own_address=run.address(),
             log_dir=settings.broker.log_dir if settings is not None and service else None,
@@ -579,6 +580,8 @@ def pytest_terminal_summary(terminalreporter: Any, config: pytest.Config) -> Non
     if not results:
         return
     terminalreporter.section(f"EMI job {state.job} ({state.directory})")
+    if state.resolved is not None and state.resolved["delete_own_mail"] and not hasattr(config, "workerinput"):
+        terminalreporter.write_line(_delete_own_mail(state.resolved, state.run_id))
     if not state.counts_asserts:
         terminalreporter.write_line(f"warning: {CaseKeyword.NO_VERIFICATION} not checked: set "
                                     "enable_assertion_pass_hook = true in the pytest configuration")
@@ -606,6 +609,21 @@ def pytest_terminal_summary(terminalreporter: Any, config: pytest.Config) -> Non
         (state.directory / "calibration.json").write_text(json.dumps(calibration, indent=2), encoding="utf-8")
         terminalreporter.write_line(f"calibration: {json.dumps(calibration['tests'])} "
                                     f"(per step: {state.directory / 'calibration.json'})")
+
+
+def _delete_own_mail(resolved: Resolved, run_id: str, api_factory: Callable[..., EmiApi] = EmiApi) -> str:
+    """Delete this run's mail at the end of the job (AMB-79); a failure is reported, never a test result.
+
+    Runs on the controller after the last test, when every worker has released its run lease.
+    """
+    try:
+        with api_factory(api_settings(resolved), run_id=run_id) as api:
+            report = api.delete_run_mail()
+    except EmiError as error:
+        primary, _secondary = keywords_of(error)
+        return f"warning: this run's mail was not deleted: {primary}: {error}"
+    return (f"deleted this run's mail ({report.get('run', '')}): {report.get('total', 0)} email(s), "
+            f"per folder {report.get('counts', {})}")
 
 
 def _read_json(path: Path) -> dict[str, Any]:

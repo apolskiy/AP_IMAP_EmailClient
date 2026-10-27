@@ -2,18 +2,21 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit tests: broker request handling, leases, connection budget and purge (design §7)."""
 
+import json
 import threading
 from datetime import date
 from pathlib import Path
 
 import pytest
 
+from emi_config import resolve
 from emi_reader import Cta, EmailWaitError, ImapConnectionError, ImapSettings, ReaderCaseKeyword, ReaderKeyword
 from emi_sender import InvalidInputError
 from emi_test_broker import BrokerSettings, PurgeRefusedError, TestBrokerKeyword
 from emi_test_broker.codec import cta_to_json
 from emi_test_broker.leases import ConnectionBudget, LeaseTable
-from emi_test_broker.purge import PurgeRequest, search_criteria
+from emi_test_broker.purge import PurgeRequest, run_of, search_criteria
+from emi_test_broker.settings import OPTIONS, broker_settings_from, settings_from_json, settings_to_json
 from unittests.emi_test_broker.broker_sims import LINK, make_service
 from unittests.sims import SimClock
 
@@ -31,6 +34,20 @@ class TestEMIBrokerHealthAndSettings:
         assert health["service"] == "emi_test_broker" and health["ready"]
         assert health["pool"] == {"used": 0, "limit": 10}
         assert "Sup3r-secret" not in str(health) and health["settings"]["imap"]["password"] == "***"
+
+    def EMI_TEST_BROKER_UNIT_130084_health_shows_each_source(self, tmp_path: Path) -> None:
+        """``/health`` names where each option came from (R-CFG-04); sources survive the auto-start settings
+        file and never change the config hash."""
+        resolved = resolve(OPTIONS, cli={"max_connections": "4"}, environ={"EMI_TEST_BROKER_PORT": "9025"})
+        settings = broker_settings_from(resolved, log_dir=tmp_path, state_dir=tmp_path)
+        sources = make_service(tmp_path, **{"max_connections": 4, "port": 9025,
+                                            "sources": settings.sources})[0].health()["sources"]
+        assert (sources["max_connections"], sources["test_broker_port"], sources["imap_host"]) == (
+            "cli", "env", "default")
+        rebuilt = settings_from_json(json.loads(json.dumps(settings_to_json(settings))), {})
+        assert rebuilt.sources == settings.sources
+        assert settings.config_hash() == BrokerSettings(port=9025, max_connections=4, log_dir=tmp_path,
+                                                        state_dir=tmp_path).config_hash()
 
     def EMI_TEST_BROKER_UNIT_130002_config_hash_tracks_settings_and_password(self) -> None:
         """Same settings, same hash; another password or budget, another hash."""
@@ -119,23 +136,25 @@ class TestEMIBrokerSendAndWait:
 
     @pytest.mark.network
     def EMI_TEST_BROKER_UNIT_130017_budget_exhausted_is_connection_limit(self, tmp_path: Path) -> None:
-        """All connections busy for the whole wait: READER_IMAP_CONNECTION_LIMIT, environment failure."""
+        """All connections busy for the whole lookup: READER_IMAP_CONNECTION_LIMIT, environment failure. Waits
+        take no slot since the shared poller looks for them (AMB-80), so a report lookup shows the rule."""
         service, mailboxes, *_sims = make_service(tmp_path, max_connections=1)
         caught: list[Exception] = []
 
-        def _second_wait() -> None:
+        def _second_lookup() -> None:
             try:
-                service.wait({**_WAIT, "timeout": 0.05})
+                service.emails({"addresses": [_ADDRESS], "timeout": 0.05})
             except ImapConnectionError as error:
                 caught.append(error)
 
-        def _second_wait_while_first_holds_the_slot() -> None:
-            thread = threading.Thread(target=_second_wait)
+        def _second_lookup_while_first_holds_the_slot() -> None:
+            mailboxes.on_wait = None  # the second lookup must not start a third
+            thread = threading.Thread(target=_second_lookup)
             thread.start()
-            thread.join()
+            thread.join(timeout=10)
 
-        mailboxes.on_wait = _second_wait_while_first_holds_the_slot
-        service.wait(dict(_WAIT))
+        mailboxes.on_wait = _second_lookup_while_first_holds_the_slot
+        service.emails({"addresses": [_ADDRESS]})
         assert caught and caught[0].primary == ReaderKeyword.IMAP_CONNECTION_LIMIT  # type: ignore[attr-defined]
         assert caught[0].infrastructure  # type: ignore[attr-defined]
 
@@ -218,7 +237,7 @@ class TestEMIBrokerPurge:
         service, _mailboxes, _sender, purge = make_service(tmp_path)
         report = service.purge({"dry_run": True, "requested_by": "tester"})
         assert report == {"dry_run": True, "scope": 'HEADER X-EMI-Test-Id ""', "counts": {"INBOX": 2},
-                          "total": 2, "requested_by": "tester"}
+                          "total": 2, "requested_by": "tester", "run": ""}
         assert not purge.deleted and purge.expunged == 0 and purge.closed
 
     def EMI_TEST_BROKER_UNIT_130033_purge_flags_and_expunges(self, tmp_path: Path) -> None:
@@ -252,3 +271,33 @@ class TestEMIBrokerPurge:
         service, *_sims = make_service(tmp_path)
         with pytest.raises(ValueError):
             service.purge({"older_than_days": -1})
+
+    def EMI_TEST_BROKER_UNIT_130082_run_scoped_purge_deletes_only_that_run(self, tmp_path: Path) -> None:
+        """Every worker's mail of the run goes; another run started the same second, unmarked mail and other
+        runs' leases are left alone (AMB-79)."""
+        service, _mailboxes, _sender, purge = make_service(tmp_path)
+        purge.folders["INBOX"] = [3, 4, 5, 6, 7]
+        purge.run_ids = {3: "20261027t055313-w00-74f4", 4: "20261027t055313-w03-74f4",
+                         5: "20261027t055313-w01-0bad", 6: "20261027T055313-w12-74F4"}
+        service.lease("acquire", {"run_id": "20261027t060000-w00-cafe", "holder": "another run"})
+        report = service.purge({"run_id": "20261027t055313-w02-74f4", "requested_by": "harness"})
+        assert report["run"] == "20261027t055313-74f4" and report["counts"] == {"INBOX": 3}
+        assert purge.deleted == [3, 4, 6] and purge.expunged == 1
+        assert purge.criteria == ['HEADER X-EMI-Run-Id "20261027t055313"']
+        assert purge.header_reads == [([3, 4, 5, 6, 7], "X-EMI-Run-Id")]
+
+    def EMI_TEST_BROKER_UNIT_130083_run_scoped_purge_refused_while_that_run_is_active(self, tmp_path: Path) -> None:
+        """A lease of any worker of the run refuses it, naming the lease; a bad run ID or a mixed scope is
+        invalid input."""
+        service, _mailboxes, _sender, purge = make_service(tmp_path)
+        service.lease("acquire", {"run_id": "20261027t055313-w05-74f4", "holder": "worker 5"})
+        with pytest.raises(PurgeRefusedError) as caught:
+            service.purge({"run_id": "20261027t055313-74f4"})
+        assert caught.value.details["active_runs"] == ["20261027t055313-w05-74f4"] and not purge.deleted
+        with pytest.raises(ValueError):
+            service.purge({"run_id": "run-1"})
+        with pytest.raises(ValueError):
+            service.purge({"run_id": "20261027t055313-74f4", "everything": True})
+        assert run_of(" 20261027T055313-w03-74F4 ") == "20261027t055313-74f4"
+        assert search_criteria(PurgeRequest(run="20261027t055313-74f4"), date(2026, 10, 27)) == \
+            'HEADER X-EMI-Run-Id "20261027t055313"'

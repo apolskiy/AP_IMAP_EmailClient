@@ -85,6 +85,7 @@ arrives in a folder the reader can open. If not, the job stops at once and every
 | `unit-emi-sender` | Automatically when `emi_sender/`, `unittests/emi_sender/` or `unittests/netfaults/` changes; also by hand | Sender unit tests on their own. Never block. |
 | `unit-emi-test-broker` | Automatically when `emi_test_broker/` or `unittests/emi_test_broker/` changes; also by hand | Test broker unit tests on their own. Never block. |
 | `unit-emi-greenmail` | Automatically when `emi_greenmail/` or `unittests/emi_greenmail/` changes; also by hand | Greenmail client unit tests on their own. Never block. |
+| `unit-emi-config` | Automatically when `emi_config/` or `unittests/emi_config/` changes; also by hand | The option table's unit tests on their own. Every tool reads its settings through the table, so a change to `emi_config/` also runs every tool's job. Never block. |
 | `unit-emi-harness` | Automatically when `emi_harness/` or `unittests/emi_harness/` changes; also by hand | Harness unit tests on their own. Never block. |
 | `test-validity` | Weekly (Monday 03:00 UTC: every named fault, and P0 and P1 repeated 3 times); by hand with a choice of check, fault, job to repeat and repeats | Proves the functional tests fail when a tool is broken (named faults) and pass when it works (repeat runs, timing margins); design §13.4. Ubuntu. Never blocks. |
 | `unit-outage` | Weekly (Monday 04:00 UTC), automatically when `unittests/outage/` changes; also by hand | Stops and restarts the job's own Greenmail container under the reader, the sender and the API, and checks each reports the outage with the right keyword and recovers (design §13.2, layer 3). Ubuntu only. Never blocks. |
@@ -111,12 +112,13 @@ Run these from the repository root after the Greenmail setup in the README. They
 
 | CI job | Local command |
 |---|---|
-| `lint` | `pylint --rcfile=.pylintrc emi_reader emi_sender emi_test_broker emi_greenmail emi_api emi_harness tests unittests conftest.py` |
+| `lint` | `pylint --rcfile=.pylintrc emi_config emi_reader emi_sender emi_test_broker emi_greenmail emi_api emi_harness tests unittests conftest.py` |
 | `unit` | `python -m pytest unittests` |
 | `unit-emi-reader` | `python -m pytest unittests/emi_reader` |
 | `unit-emi-sender` | `python -m pytest unittests/emi_sender` |
 | `unit-emi-test-broker` | `python -m pytest unittests/emi_test_broker` |
 | `unit-emi-greenmail` | `python -m pytest unittests/emi_greenmail` |
+| `unit-emi-config` | `python -m pytest unittests/emi_config` |
 | `unit-emi-harness` | `python -m pytest unittests/emi_harness` |
 | `functional-p0` … `functional-p4` | `python -m emi_harness.cli --priority P0` (or `P1`, `P2`, `P3`, `P4`; locally also `P2-P4` as one job, which itself needs 85%) |
 | `quality-gate` | `python -m emi_harness.gate <ubuntu reports> <windows reports> --expect P0 ... --expect P4` (one `--expect` per chosen job) |

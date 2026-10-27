@@ -33,6 +33,7 @@ keyword prefix.
 
 | Package | Role | Unit tests / CI job | Keyword prefix |
 |---|---|---|---|
+| `emi_config/` | Option core (AMB-81): the option record, conversion and ranges, precedence with sources, `.env` reading, `argparse` generation. Imports no EMI package | `unittests/emi_config/`, `unit-emi-config` | n/a (raises `ValueError`, reported by each tool as invalid input) |
 | `emi_reader/` | IMAP reader: connection, search, wait, MIME parsing, CTA link extraction, token helpers | `unittests/emi_reader/`, `unit-emi-reader` | `READER_` |
 | `emi_sender/` | Sender: JSON templates on the sample `.eml` files, SMTP / IMAP `APPEND` delivery, batch distributions, manifest | `unittests/emi_sender/`, `unit-emi-sender` | `SENDER_` |
 | `emi_test_broker/` | Local background service (port 8025) that runs the sender and reader for every run on the machine, sharing connections, run leases and one log | `unittests/emi_test_broker/`, `unit-emi-test-broker` | `TEST_BROKER_` |
@@ -43,6 +44,8 @@ keyword prefix.
 
 **Dependency direction** (no cycles): `tests → emi_api → {emi_test_broker client | emi_reader, emi_sender} + emi_greenmail`;
 `emi_harness` wraps pytest and reads keywords from every package; `emi_reader` and `emi_sender` never import each other.
+Every package may import `emi_config`, which imports none of them, so each tool runs on its own with only
+`emi_config` beside it.
 
 **Client modes** (AMB-53): `--emi-client-mode=service` (default) sends every send/wait request to
 `emi_test_broker`; `inprocess` calls `emi_reader` / `emi_sender` directly. The broker is a transport
@@ -68,10 +71,22 @@ one each, but this project implements **one sender and one reader against one se
 * **Precedence**, highest first: **argument in code > CLI option > real environment variable > `.env`
   file > built-in default**. A real environment variable beats `.env`, so a CI secret or one-off
   override never requires editing `.env`. There is no other config file.
-* **One option table** (`emi_harness/options.py`) defines each option once: name, `EMI_*` env var,
-  type, default, allowed range, help text, secret flag. Both the pytest options (`pytest_addoption` in
-  `conftest.py`) and every tool's `argparse` parser are generated from it; a unit test checks that both
-  forms match. `emi_harness.cli` passes its options through to pytest unchanged.
+* **One option table** defines each option once: name, `EMI_*` env var, type, default, allowed range,
+  help text, secret flag (AMB-81). The record, the precedence rules and the generators live in
+  `emi_config/`; each tool declares its own rows in its `settings.py` (reader: `imap_*`, timeouts;
+  sender: `smtp_*`, transport, base mailbox, and the `imap_port` / `imap_password` and timeouts it needs
+  for `APPEND`; Greenmail: `greenmail_*`; broker: its port, budget and log directory). Each larger table
+  merges the ones it uses: broker = reader + sender + its own, API = broker + Greenmail + mode and wait
+  timeout, harness (`emi_harness/options.py`) = API + its own. A name declared by two tools must be the
+  identical row, or the merge raises, so the reader and sender agree on `imap_port` without importing
+  each other.
+* **Generated forms**: every tool CLI (`python -m emi_sender`, `python -m emi_test_broker`), the harness
+  CLI and the pytest options are generated from these tables. A flag has one name everywhere:
+  `--smtp-host` in a tool's CLI, `--emi-smtp-host` under the harness CLI and pytest, where the prefix
+  keeps pytest's namespace clean. Unit tests check every CLI against its table. Arguments that describe
+  one request rather than a setting (the sender's `--to` and counts, the broker's subcommands and purge
+  scope) stay plain `argparse` arguments. `emi_harness.cli` passes its options through to pytest
+  unchanged.
 * **Default credentials** (user decision 2026-10-26): the built-in defaults are the local Greenmail
   test user `qa` / `password`, public in the README's Docker command, so a fresh clone runs against
   local Greenmail with no setup. Teams that want their own password start Greenmail with
@@ -147,20 +162,27 @@ RFC 6855) is not supported: Greenmail 2.1.15, the target server, does not advert
 Unit tests replace the transport with a simulation that fails on demand (§13).
 
 ### 5.2 Connections (AMB-28, AMB-47)
-One IMAP connection per pytest-xdist worker (in service mode: per broker pool slot), reused by the tests
-it runs; PRE steps only check it (`NOOP`, reconnect if needed). `max_connections` (default **10** per
+Through the broker, every wait shares the poller's one IMAP connection (§5.9); sends and report lookups
+take pooled connections. A `Mailbox` used on its own keeps one connection, reused by the waits it runs; PRE steps only check it (`NOOP`, reconnect if needed). `max_connections` (default **10** per
 run) caps connections; the harness never starts more workers than the cap (lowers `-n`, logs a warning).
 Details and server limits: §11.
 
 ### 5.3 Search scope and folder accessibility (AMB-24, AMB-25, AMB-26)
-* **Scope**: `[(account, [folders…])…]`, default `[(default, ["INBOX"])]`.
+* **Scope**: `[(account, [folders…])…]`, default `[(default, ["INBOX"])]`. Not built: more than one
+  account (AMB-86); the reader serves the one configured account.
 * **Probe** at session start and at each wait: `LOGIN → LIST → EXAMINE` per pair, classified
   `accessible`, `not_listed`, `noselect`, `select_denied`, `login_failed`, `network_error`.
   The **accessibility matrix** goes into every test's report (JUnit property, Allure attachment,
   HTML extras, log), pass, fail or skip.
 * **Outcomes**: 0 accessible pairs → skip `READER_MAILBOX_NONE_ACCESSIBLE` (environment). ≥ 1 → run
   against the accessible pairs. The test's declared `expected_folder` inaccessible → skip
-  `READER_MAILBOX_EXPECTED_FOLDER_INACCESSIBLE`.
+  `READER_MAILBOX_EXPECTED_FOLDER_INACCESSIBLE` (AMB-85): `expected_folder` is a parameter of
+  `wait_for_link` / `wait_for_emails`, passed through `EmiApi` and the broker's `/wait`; the wait checks
+  it against the probe before polling and raises `MailboxAccessError` with that keyword, which the
+  harness reports as an environment skip like `NONE_ACCESSIBLE`. A folder that is not among the
+  configured folders is invalid input: the wait raises `ValueError` before it polls, like an unknown
+  `match_fields`, and the broker hands the same `ValueError` back to the caller. On the shared poller
+  the check ends only the wait that named the folder.
 * **Filter evidence** (any one): the folder is in `filter_risk_folders` and inaccessible; the folder is
   listed, `EXAMINE` is denied, but `STATUS UIDNEXT` grew during the wait; the folder carries `\Junk`
   (RFC 6154) and is inaccessible. Email not found + evidence → **environment failure**
@@ -173,9 +195,9 @@ Details and server limits: §11.
   (default every **2 s ± jitter**) searches **new UIDs only** for the address
   (`UID SEARCH UID <next>:* TO "<full address>"`, one search per selected field) and fetches only what
   the search returns. All candidates of one look are fetched whole (`BODY.PEEK[]`) in **one `UID FETCH`**
-  and matched client-side on headers, markers and CTA. In service mode one poll loop serves every
-  waiting request. A `UIDVALIDITY` change triggers a full re-search and an info log
-  `READER_IMAP_UIDVALIDITY_CHANGED`.
+  and matched client-side on headers, markers and CTA. In the broker one shared poller per account serves
+  every waiting request (§5.9, AMB-80); a `Mailbox` used on its own polls for its one wait. A `UIDVALIDITY`
+  change triggers a full re-search and an info log `READER_IMAP_UIDVALIDITY_CHANGED`.
 * **Why search, then one fetch** (AMB-71): measured on Greenmail, a `UID SEARCH` costs about 45 ms whether
   the folder holds 1,800 or 4,800 messages, but every `UID FETCH` command costs a fixed amount that grows
   with the folder (about 110 ms at 1,800 messages, 450-500 ms at 4,800), however many messages it returns.
@@ -269,6 +291,47 @@ for pass/fail.
 * No separate lookup: `GET /inventory` and `api.reader.inventory` are not built, since each would cost
   the fetches AMB-76 avoids.
 
+### 5.9 Shared poller (AMB-80)
+**Why**: with one poll per wait, every waiting request sends its own `EXAMINE`, searches and fetch every
+2 s. On Greenmail each of these costs more as the folder grows, and they add up: in `test-validity` run
+40451473560, 4 workers at about 15,600 messages made each wait take about 20 s, and the 10-address batch
+tests ran out of their 90 s step limit. Measured at that size, `EXAMINE` and searches cost about 0.05 s,
+but every `FETCH` costs about 6 s, however little it asks for, and Greenmail runs fetches one at a time:
+4 waits polling on their own took 25.7 s, one shared poll 6.1 s (register, Spike Evidence). One poller
+sends one set of commands per cycle, however many requests wait, and holds one connection instead of
+one per wait. Keeping the folder small (AMB-79) cuts the fetch cost itself.
+
+* **Where**: `emi_reader/poller.py` (`SharedPoller`), so the IMAP logic stays in the reader; the broker
+  creates one per account and gives every `/wait` to it, in `service` and `inprocess` mode alike (the
+  `inprocess` backend runs the same broker service). A `Mailbox` used on its own keeps its own loop (§5.4).
+* **Cycle** (default every 2 s ± jitter, only while a request waits; the connection closes after 60 s
+  with none):
+  1. `EXAMINE` each readable folder (totals for every request's inventory; `UIDVALIDITY` check).
+  2. **New requests** (registered since the last cycle): the pre-arrival search over the whole folder, as
+     today, one search per address and field.
+  3. **Waiting requests**, only when `UIDNEXT` grew: one `UID SEARCH UID <next>:*` over the new UIDs for
+     all their addresses at once (`OR` of each address on each of its fields, at most 20 terms per search,
+     more in further searches).
+  4. **One `UID FETCH`** of every candidate from steps 2 and 3 (`BODY.PEEK[]`), each email parsed once.
+  5. **Dispatch**: each request matches the parsed emails exactly as today (recipient on its own
+     `match_fields`, markers, CTA) and records the categories for its inventory; then the waiting requests
+     are woken.
+* **Each request keeps its own rules**: deadline, count, settle window, duplicates, the give-up decision
+  and its keyword (§5.4). A request that is satisfied or past its deadline leaves before the next cycle.
+* **Errors**: a network error in a cycle is recorded in the attempt history of every request waiting at
+  that moment, and the poller retries with the usual backoff (§5.5), the restart rule included (AMB-78,
+  judged on the poller's connection). A fatal error (wrong password, refused first connect) ends every
+  waiting request with that error. A request's deadline is never extended by the poller's retries.
+* **Folder access**: the poller probes folders when it connects and after a reconnect; each request gets
+  the matrix of its first cycle, and the filter check at give-up (§5.3) re-probes through the poller.
+* **Connection budget**: the poller holds **one** slot of `max_connections` while it is connected;
+  `/send`, `/emails` and purge keep taking their own slots. Waits no longer queue for slots, so
+  `READER_IMAP_CONNECTION_LIMIT` from the broker budget applies only to those other calls.
+* **Unchanged for tests**: the `/wait` request and answer (link or emails, `access_matrix`, `attempts`,
+  `inventory`, `queued_sec`, now always 0), errors and keywords, and `EmiApi`. Broker version 1.2.0;
+  1.3.0 adds recipient field combinations to `/send` (AMB-82), `expected_folder` to `/wait` (AMB-85) and
+  setting sources to `/health` (R-CFG-04).
+
 ## 6. `emi_sender`: the Sender (AMB-06, AMB-33 to AMB-37, AMB-39, AMB-45, AMB-51, AMB-61)
 
 ### 6.1 Templates and kinds
@@ -295,8 +358,11 @@ same address in the same second distinct.
   logged and written to the manifest.
 * `--order fixed|random` + `--seed` (always logged, so any mix can be replayed), `--concurrency 1–32`
   (own SMTP connection each), `--jitter-ms`.
-* Recipient field per email: `To` (default), `Cc`, `Bcc` or combinations. In Bcc tests the sender adds
-  `Delivered-To: <plus address>` itself, emulating Gmail (documented as an emulation).
+* Recipient field per email: `To` (default), `Cc`, `Bcc` or combinations (AMB-82): a send takes one or
+  more fields (`fields=("to", "cc")`, CLI `--field to,cc`, batch file `"field"` as a name or a list) and
+  puts the test address in each. Whenever `Bcc` is among them the sender adds
+  `Delivered-To: <plus address>` itself, emulating Gmail (documented as an emulation). The reader needs
+  no change: a wait matches any of its `match_fields`.
 
 ### 6.4 Delivery and routing
 * `--transport smtp` (default): envelope `RCPT TO: qa@example.com` (the shared base mailbox), header
@@ -304,7 +370,12 @@ same address in the same second distinct.
   this is how every email lands in the one shared inbox; no relay is needed.
 * `--transport append`: IMAP `APPEND` straight into `qa`'s INBOX (exact timing for pre-arrived and
   mid-wait cases).
-* Default path is **through the test broker**; `--direct` bypasses it.
+* The sender CLI sends **directly** by default, so the sender works on its own; `--via-broker` sends
+  through a running (or auto-started) test broker, sharing its connection budget and log while tests
+  run (AMB-84, which reversed the earlier "broker by default, `--direct` to bypass": the broker imports
+  the sender, so a sender that needed the broker could not run alone). The broker client is imported
+  only when `--via-broker` is given. Exit codes and the manifest are the same on both paths; a broker
+  that cannot be reached is exit 3.
 * Messages are always serialized with **CRLF line endings** (`policy.SMTP`) before SMTP or `APPEND`:
   `smtplib` dot-stuffs bytes without fixing bare LF, and Greenmail then stores a doubled dot
   (`cloud..example.com`), which corrupts quoted-printable links (Spike Evidence).
@@ -356,6 +427,17 @@ printed as JSON by the CLI, saved in the run directory. Exit codes and keywords:
   (`TEST_BROKER_PURGE_REFUSED`, naming the active run IDs); **no override**. Default scope: only mail
   carrying the EMI marker. Logs counts per category and who ran it. Blind spots (other machines, people
   in a webmail UI) are documented.
+* **Run-scoped delete** (AMB-79): `POST /purge` with `run_id` (CLI `purge --run-id <id>`) deletes only
+  mail whose `X-EMI-Run-Id` is that run, in every configured folder (`HEADER X-EMI-Run-Id "<id>"`, then
+  each candidate's header compared exactly, since servers match `HEADER` by substring). Other runs may be
+  active, since their mail is not touched; it is **refused** while that run itself still has a lease or a
+  wait (`TEST_BROKER_PURGE_REFUSED`). `--older-than` and `--all` do not combine with it. A run is the run
+  ID without its worker part (`20261027t055313-w03-74f4` belongs to `20261027t055313-74f4`); the broker
+  compares that part itself, since it does not import `emi_api`. Callers: `EmiApi.delete_run_mail()`
+  (releases the API's own lease first), used by the harness at the end of a job with
+  `--emi-delete-own-mail on` / `EMI_DELETE_OWN_MAIL` (off by default; on the controller, after every
+  worker released its lease; the count, or the reason it failed, is printed in the job summary and never
+  changes a test result), which every stability job uses (§13.4). The reader stays read-only.
 * **Implementation notes** (Phase 3):
   * **State file** `<state dir>/broker_<port>.json` (pid, token, version, config hash); state dir
     defaults to the system temp folder (`--state-dir`). `GET /health` needs no token; every `POST`
@@ -628,14 +710,17 @@ suggests lower limits (e.g. p99 × 2); defaults are lowered on evidence.
   using it; Greenmail (local Docker, v2.1.15) **400** measured without failure (ceiling not reached).
 * **Setting**: `max_connections` per run, **default 10** (`--emi-max-connections`,
   `EMI_MAX_CONNECTIONS`). One run stays under Gmail's 15; Greenmail fits 40 runs at the default.
-* **One connection per worker**; the harness caps workers at `max_connections` (warning when `-n` is lowered).
+* **Waits share one connection** through the broker's poller (§5.9, AMB-80); sends and report lookups
+  take one each. The harness still caps workers at `max_connections` (warning when `-n` is lowered),
+  since each worker may be sending at the same time.
 * **Over-limit reply** (e.g. `[ALERT] Too many simultaneous connections`) is transient: jittered backoff,
   `READER_IMAP_CONNECTION_LIMIT`; if it persists, skip with that keyword (infrastructure).
 * **Several runs or machines on one real mailbox** must divide the server's limit (3 runs on Gmail →
   `max_connections=5` each); they cannot coordinate otherwise.
-* **Parallel runs** never see each other's mail (test ID + run ID in every address); no run purges while
-  others may run; reports and logs go to per-run directories.
-* **Poll jitter** keeps workers from polling in lockstep.
+* **Parallel runs** never see each other's mail (test ID + run ID in every address); a run deletes only
+  its own mail (AMB-79), and a purge of other mail is refused while others may run; reports and logs go
+  to per-run directories.
+* **Poll jitter** keeps separate pollers (other machines, a `Mailbox` used on its own) out of lockstep.
 
 ## 12. CI (AMB-15, AMB-43, AMB-44, AMB-48, AMB-55 to AMB-57, AMB-60)
 
@@ -687,7 +772,8 @@ User-facing details: `docs/ci_jobs.md`. Rule source: `.claude/rules/framework-ru
   its own Greenmail container, by hand and weekly, and automatically when `unittests/outage/` changes. It
   never blocks and is never part of `ci-regression-run`, whose `unit` job leaves the `docker` tests out.
 * **Overlapping runs**: PR / feature-branch runs cancel the older run of the same branch; `main` and
-  manual runs are never cancelled and may run in parallel; a job using a shared real mailbox queues.
+  manual runs are never cancelled and may run in parallel; a job using a shared real mailbox queues
+  (not built, AMB-86: there is no job against a real mailbox yet).
 * **Test validity** (§13.4, AMB-64): `test-validity` (manual and weekly, Ubuntu) runs the named-fault
   and stability checks; it never blocks. Weekly it runs every fault and repeats P0 and P1 three times (a
   full-suite stability run would take hours every week); by hand any fault, job and repeat count.
@@ -785,6 +871,13 @@ from `--collect-only` with and without it.
 * Accessibility: missing folder, second account with bad credentials, unreachable host, mixed pairs.
 * Links: label match, text fallback, plain-text-only email, HTML/text mismatch (fail and warn modes),
   recipient mismatch via `sub`.
+* **Built and not built** (AMB-83, AMB-86): field combinations (`to+cc`, `to+bcc`, `cc+bcc`,
+  `to+cc+bcc`, each found by a wait on one of its fields and missed by a wait on a field outside it) and
+  `Delivered-To` alone (a `Bcc` email waited for on `delivered-to` only) are functional cases. Not built
+  as functional cases: `X-Original-To` (the sender cannot produce it), the transport as a parameter (it
+  is chosen per run), unmarked manual mail, accessibility failures and link variants, which the unit
+  tests cover (links 100020-100028, accessibility 100050-100053, 100094) and the templates cannot
+  produce.
 * **Scale**: parametrized families (kinds × fields × distributions × orders × transports) reach
   **1,000+** test cases with unique IDs in 400000–599999, P0 + P1 within 20%.
 * **Critical (P0)** (AMB-68): one email of each kind, sent and received: an activation email yields its
@@ -832,6 +925,16 @@ in some repeats) or **failing** (in none), with its keywords per repeat. **Timin
 longest duration over the repeats is above 80% of its test limit, or a step above 80% of its step
 limit, is listed as a **thin margin**, so a limit too close to reality is found before it fails at random.
 Exit 1 when anything is listed.
+* **Selections and cleanup** (AMB-79): `--priority all` (not narrowed by `--test`, `--file` or
+  `--keyword`) runs each repeat as the regression chain, P0, P1, P2, P3 and P4 one after another under
+  one run ID, so later jobs read the earlier jobs' results and a failed parent's dependents are still
+  skipped; an aborted job ends the repeat, as it ends the chain. Every stability job runs with
+  `--emi-delete-own-mail on` (run-scoped delete, §7), so a mailbox never holds more than one job's mail,
+  even when a job fails before its delete. Without this, run 40451473560 ran all 1,019 tests twice on one Greenmail:
+  pass 1 passed in 67 min, and pass 2, starting at about 8,000 messages, slowed until the batch tests
+  failed their step limit at about 15,600 and the circuit breaker stopped the job. Expected cost per
+  repeat: about 16 min of tests (the regression jobs' times on a fresh Greenmail) plus about 30 s of
+  start-up per job and the delete. A narrower `--priority` runs as one job per repeat, with the same delete.
 
 **3. No test passes by checking nothing.** The harness counts every `step.verify` and every passing plain
 `assert` (pytest's `enable_assertion_pass_hook`). A functional test that would pass with a count of 0

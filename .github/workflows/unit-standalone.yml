@@ -2,13 +2,15 @@
 # SPDX-License-Identifier: Apache-2.0
 # Standalone unit jobs, one per tool (design §12): outside project status, never blocking.
 # Each runs when its own tool folder or unit-test folder changed, or by hand; a change to
-# unittests/netfaults/ runs the reader and sender jobs.
+# unittests/netfaults/ runs the reader and sender jobs, and a change to the option core emi_config/
+# (which every tool uses, AMB-81) runs its own job and every tool's.
 name: unit-standalone
 
 # Markdown never triggers a run, even inside a tool folder (the last pattern).
 on:
   push:
     paths:
+      - "emi_config/**"
       - "emi_reader/**"
       - "emi_sender/**"
       - "emi_test_broker/**"
@@ -19,11 +21,13 @@ on:
       - "unittests/emi_test_broker/**"
       - "unittests/emi_greenmail/**"
       - "unittests/emi_harness/**"
+      - "unittests/emi_config/**"
       - "unittests/netfaults/**"
       - "!**/*.md"
   pull_request:
     branches: [main]
     paths:
+      - "emi_config/**"
       - "emi_reader/**"
       - "emi_sender/**"
       - "emi_test_broker/**"
@@ -34,6 +38,7 @@ on:
       - "unittests/emi_test_broker/**"
       - "unittests/emi_greenmail/**"
       - "unittests/emi_harness/**"
+      - "unittests/emi_config/**"
       - "unittests/netfaults/**"
       - "!**/*.md"
   workflow_dispatch:
@@ -42,7 +47,7 @@ on:
         description: Tool to test
         type: choice
         default: all
-        options: [all, emi_reader, emi_sender, emi_test_broker, emi_greenmail, emi_harness]
+        options: [all, emi_config, emi_reader, emi_sender, emi_test_broker, emi_greenmail, emi_harness]
 
 concurrency:
   group: >-
@@ -70,7 +75,7 @@ jobs:
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD: ${{ github.sha }}
         run: |
-          all="emi_reader emi_sender emi_test_broker emi_greenmail emi_harness"
+          all="emi_config emi_reader emi_sender emi_test_broker emi_greenmail emi_harness"
           if [ "$EVENT" = "workflow_dispatch" ]; then
             [ "$CHOSEN" = "all" ] && picked="$all" || picked="$CHOSEN"
           else
@@ -86,9 +91,18 @@ jobs:
             done
             # The fault proxy and simulated servers (design §13.2) serve the reader and sender tests.
             if echo "$changed" | grep -qE "^unittests/netfaults/"; then picked="$picked emi_reader emi_sender"; fi
+            # Every tool builds its settings on the option core (design §3).
+            if echo "$changed" | grep -qE "^emi_config/"; then picked="$all"; fi
           fi
           echo "tools=$picked" >> "$GITHUB_OUTPUT"
           echo "tools to test:$picked"
+
+  unit-emi-config:
+    needs: changes
+    if: contains(needs.changes.outputs.tools, 'emi_config')
+    uses: ./.github/workflows/unit-tool.yml
+    with:
+      tool: emi_config
 
   unit-emi-reader:
     needs: changes

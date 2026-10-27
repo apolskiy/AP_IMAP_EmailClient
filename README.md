@@ -15,12 +15,15 @@ button, with many tests running in parallel against one shared mailbox.
 
 The **library**, `EmiApi` (`emi_api/`), is the one Python API tests call. It hands each send and wait
 to the test broker rather than talking to the mail server itself. The **harness** (`emi_harness/`) runs
-the tests, applies priorities and gates, and writes the reports.
+the tests, applies priorities and gates, and writes the reports. Every tool, the library and the harness
+read their settings through **one option table** (`emi_config/`), so a setting has the same name,
+environment variable and default everywhere, and each tool also works on its own, outside the tests.
 
-> **Status:** implementation in progress. The reader, sender, Greenmail client, test broker, central
-> API (`EmiApi`) and test harness are built, unit-tested and checked against Greenmail, and the
-> functional suite has 1,019 test cases, with CI workflows and test-validity checks (design §13.4).
-> What is built and what is not yet is tracked in [docs/rtm.md](docs/rtm.md).
+> **Status:** built. The reader, sender, Greenmail client, test broker, central API (`EmiApi`) and test
+> harness are built, unit-tested and checked against Greenmail, and the functional suite has 1,034 test
+> cases, with CI workflows and test-validity checks (design §13.4). What the design describes and was
+> decided not to build is listed under [What Was Left Out](#what-was-left-out); requirement by
+> requirement, [docs/rtm.md](docs/rtm.md).
 
 ## Getting Started
 
@@ -176,7 +179,7 @@ Run every command from the repository root with the virtual environment from ste
 server; the functional tests need Greenmail from step 3 running.
 
 ```bash
-pylint --rcfile=.pylintrc emi_reader emi_sender emi_test_broker emi_greenmail emi_api emi_harness tests unittests conftest.py
+pylint --rcfile=.pylintrc emi_config emi_reader emi_sender emi_test_broker emi_greenmail emi_api emi_harness tests unittests conftest.py
 python -m pytest unittests                       # all unit tests
 python -m pytest unittests -m network            # only the network-fault unit tests
 python -m emi_harness.cli                        # every functional test (job "all")
@@ -186,17 +189,20 @@ python -m emi_harness.cli --file smoke.txt      # one test name per line
 python -m emi_harness.cli --keyword READER_     # tests tied to a keyword or a keyword prefix
 python -m emi_harness.cli -n 4                  # 4 parallel workers (capped at --emi-max-connections)
 python -m emi_harness.cli --allure --calibrate  # also Allure results; record durations, suggest limits
+python -m emi_harness.cli --emi-delete-own-mail on  # at the end, delete this run's mail and nothing else
 python -m emi_harness.gate reports/<run>        # quality gates over a run's results
+python -m emi_test_broker purge --run-id <run>  # delete one run's mail (refused while that run is active)
 ```
 
 Every `--emi-*` setting (`python -m emi_harness.cli --help`) can also be given as an `EMI_*`
 environment variable or in `.env`; a command-line value wins. Plain `python -m pytest tests` runs the
 same functional tests with the same `--emi-*` options.
 
-The functional suite (`tests/functional/`) has 1,019 test cases. The 5 critical (P0) ones send one email of
+The functional suite (`tests/functional/`) has 1,034 test cases. The 5 critical (P0) ones send one email of
 each kind (activation and invitation must yield their links, generic must yield none), and, per link kind,
 wait for that link while two other emails arrive first. The others: delivery basics, counts per kind and
-recipient field, recipient fields not matched, markers, mail arriving during the wait, isolation from
+recipient field, recipient fields not matched, the address in several fields at once (`To` + `Cc`,
+`Cc` + `Bcc`, ...) and in `Delivered-To` alone, markers, mail arriving during the wait, isolation from
 other tests' mail, and 864 batch cases (every distribution preset × send order × recipient field × kind
 mix × concurrency × seed). Each parametrized case is its own TestRail case, so `--test C410123` runs
 exactly one. The ID blocks are listed in `tests/functional/catalog.py`. Run one worker at a time and the
@@ -300,6 +306,11 @@ against another IMAP/SMTP server (for example Gmail with an App Password), set t
 * **CI:** add the same names as repository secrets (*Settings → Secrets and variables → Actions*);
   the workflows pass them to the jobs as environment variables.
 
+**The same settings on every tool.** Each setting above also has a command-line flag: `--emi-imap-host`
+on the harness and in pytest, and `--imap-host` on the tools' own command lines below. The names, the
+environment variables, the defaults and the order of precedence (command line, then `EMI_*` variable,
+then `.env`, then the default) come from one option table in `emi_config/`, so they cannot drift apart.
+
 **Your own Greenmail password (optional).** By default the tools log in as Greenmail's local test
 user `qa` with the public password `password`, so nothing needs configuring. To use your own:
 
@@ -310,9 +321,32 @@ user `qa` with the public password `password`, so nothing needs configuring. To 
    pass it to the tests as `EMI_IMAP_PASSWORD` / `EMI_SMTP_PASSWORD`.
 * Real servers limit simultaneous connections; see [IMAP Connection Limit](#imap-connection-limit).
 
+### Using the sender and the test broker on their own
+
+Neither tool needs the tests. Both take the settings above as flags, `EMI_*` variables or `.env`
+(`python -m emi_sender --help`, `python -m emi_test_broker --help`).
+
+```bash
+# Send 2 activation emails, the address in To and Cc, straight to the mail server
+python -m emi_sender --to qa+demo@example.com --activation 2 --field to,cc
+# The same through the shared test broker (started if it is not running), sharing its connections and log
+python -m emi_sender --to qa+demo@example.com --activation 2 --field to,cc --via-broker
+# Another server: flags, or EMI_SMTP_HOST / EMI_SMTP_PORT in the environment or .env
+python -m emi_sender --smtp-host mail.example.com --smtp-port 587 --smtp-security starttls --to qa+demo@example.com --generic 1
+
+python -m emi_test_broker start                          # start the broker in the background
+python -m emi_test_broker --test-broker-port 8033 serve  # or in the foreground on another port
+python -m emi_test_broker status                         # health: versions, pool, every setting and its source
+python -m emi_test_broker stop
+```
+
+The broker's settings go before the command (`start`, `serve`, ...). Its `status` shows each setting with
+where it came from (`argument`, `cli`, `env`, `.env` or `default`), passwords hidden. Sender exit codes:
+`0` all sent, `1` some failed, `2` invalid input, `3` the server or the broker could not be reached.
+
 ## Test Counts
 
-**1,474 tests in total: 455 unit tests (63 of them network tests, 4 outage tests run apart) and 1,019
+**1,513 tests in total: 479 unit tests (66 of them network tests, 4 outage tests run apart) and 1,034
 functional tests.**
 
 **Unit tests**, one folder per tool, no server needed. A **network test** makes a connection fail
@@ -330,13 +364,14 @@ to a functional run. Without Docker or the container they are skipped (`HARNESS_
 
 | Tool | Folder | Unit tests | Of which network | Outage |
 |---|---|---|---|---|
-| Reader | `unittests/emi_reader/` | 98 | 28 | 2 |
-| Sender | `unittests/emi_sender/` | 73 | 19 | 1 |
-| Test broker | `unittests/emi_test_broker/` | 56 | 8 | |
+| Reader | `unittests/emi_reader/` | 108 | 31 | 2 |
+| Sender | `unittests/emi_sender/` | 76 | 19 | 1 |
+| Test broker | `unittests/emi_test_broker/` | 59 | 8 | |
 | Greenmail client | `unittests/emi_greenmail/` | 23 | 6 | |
-| Central API (`EmiApi`) | `unittests/emi_api/` | 58 | 2 | 1 |
-| Harness | `unittests/emi_harness/` | 143 | 0 | |
-| **Total** | | **451** | **63** | **4** |
+| Option table | `unittests/emi_config/` | 5 | 0 | |
+| Central API (`EmiApi`) | `unittests/emi_api/` | 59 | 2 | 1 |
+| Harness | `unittests/emi_harness/` | 145 | 0 | |
+| **Total** | | **475** | **66** | **4** |
 
 **Functional tests** (`tests/functional/`, against Greenmail). Every functional test goes through the
 public API, so it drives the sender, the test broker and the reader together. The suite is therefore
@@ -346,14 +381,14 @@ counted by test family, not by tool:
 |---|---|---|---|---|---|---|---|
 | Delivery basics | `emi_func_delivery.py` | 8 | 5 | | 1 | 2 | |
 | Counts per kind and field | `emi_func_counts.py` | 99 | | 9 | 81 | 9 | |
-| Recipient fields | `emi_func_fields.py` | 9 | | | 9 | | |
+| Recipient fields and combinations | `emi_func_fields.py` | 24 | | | 21 | 3 | |
 | Markers | `emi_func_markers.py` | 15 | | | 12 | 3 | |
 | Arrival during the wait | `emi_func_timing.py` | 15 | | | 15 | | |
 | Isolation | `emi_func_isolation.py` | 9 | | | | 9 | |
 | Batches | `emi_func_batches.py` | 864 | | | 288 | 288 | 288 |
-| **Total** | | **1,019** | **5** | **9** | **406** | **311** | **288** |
+| **Total** | | **1,034** | **5** | **9** | **418** | **314** | **288** |
 
-These counts were taken on 2026-10-26. `python -m pytest unittests --collect-only -q` (add `-m network`, or `-m docker` for the outage tests) and
+These counts were taken on 2026-10-27. `python -m pytest unittests --collect-only -q` (add `-m network`, or `-m docker` for the outage tests) and
 `python -m pytest tests --emi-job all --collect-only -q` recount them.
 
 ## Test Priorities and Failing Fast
@@ -363,14 +398,14 @@ These counts were taken on 2026-10-26. `python -m pytest unittests --collect-onl
   and should take at most **30% of all test time**, leaving 70% for the rest. Above 30% the quality gate
   prints a `JOB_PRIORITY_TIME_SHARE` warning; timing never fails the gate, only a test's own time limit
   fails that test.
-* **What each priority holds today** (1,019 tests):
+* **What each priority holds today** (1,034 tests):
 
   | Priority | Tests | What |
   |---|---|---|
   | P0 | 5 | one email of each kind: activation and invitation yield their links, generic yields none; per link kind, a wait that skips two other emails for the later matching one |
   | P1 | 9 | one email of each kind in To, Cc and Bcc, counted exactly |
-  | P2 | 406 | every batch preset × order × field × kind mix × concurrency with seeds 1-2; counts of 2 to 10; fields, markers, arrival during the wait |
-  | P3 | 311 | the same batches with seeds 3-4; counts exceeded, isolation, other delivery checks |
+  | P2 | 418 | every batch preset × order × field × kind mix × concurrency with seeds 1-2; counts of 2 to 10; fields, field combinations, markers, arrival during the wait |
+  | P3 | 314 | the same batches with seeds 3-4; counts exceeded, isolation, `Delivered-To` alone, other delivery checks |
   | P4 | 288 | the same batches with seeds 5-6 |
 
   Batches are split by seed rather than by preset so the three side-by-side jobs send about the same
@@ -425,8 +460,8 @@ tests are skipped (`HARNESS_PROBE_EMAIL_NOT_RECEIVED`).
 
 **Not part of project status:** `ci-debug-run` (run by hand for chosen tests, a test-list file or a
 keyword), one standalone unit job per tool (`unit-emi-reader`, `unit-emi-sender`,
-`unit-emi-test-broker`, `unit-emi-greenmail`, `unit-emi-harness`) for fixing bugs, each run only when its own tool or its own unit
-tests change, `unit-outage` (the Greenmail stop / restart tests, Ubuntu, weekly and by hand, see
+`unit-emi-test-broker`, `unit-emi-greenmail`, `unit-emi-config`, `unit-emi-harness`) for fixing bugs, each run only
+when its own tool or its own unit tests change (a change to the option table in `emi_config/` runs every tool's job), `unit-outage` (the Greenmail stop / restart tests, Ubuntu, weekly and by hand, see
 [Test Counts](#test-counts)), and `test-validity` (weekly and by hand, see below).
 
 **Test validity:** a passing test is only worth something if it would fail when the tool is broken.
@@ -457,9 +492,9 @@ says how much of it is built.
 
 | File | What it contains |
 |---|---|
-| [docs/design/phase0_email_client_ambiguities.md](docs/design/phase0_email_client_ambiguities.md) | **Ambiguity register (Phase 0).** Every open question (AMB-01 to AMB-78) with its severity, the options considered, the recommendation and the author's decision; the status of open questions; **Spike Evidence**: measurements and bugs found against a live Greenmail that decisions rest on. |
+| [docs/design/phase0_email_client_ambiguities.md](docs/design/phase0_email_client_ambiguities.md) | **Ambiguity register (Phase 0).** Every open question (AMB-01 to AMB-86) with its severity, the options considered, the recommendation and the author's decision; the status of open questions; **Spike Evidence**: measurements and bugs found against a live Greenmail that decisions rest on. |
 | [docs/design/email_client_harness_design.md](docs/design/email_client_harness_design.md) | **Design document (Phase 2)**, each section citing the register rows it implements (see the next table). |
-| [docs/rtm.md](docs/rtm.md) | **Requirements traceability matrix.** Each requirement → design section → code → unit test IDs → status (Done / Partial with the gap named / Planned). |
+| [docs/rtm.md](docs/rtm.md) | **Requirements traceability matrix.** Each requirement → design section → code → unit test IDs → status (Done / Partial with the gap named / Closed, not built, with the reason). |
 | [docs/keywords.md](docs/keywords.md) | **Failure keyword catalog.** Keyword grammar; every `READER_`, `SENDER_`, `TEST_BROKER_`, `GREENMAIL_`, `API_`, `HARNESS_`, `CASE_` and `JOB_` keyword with its meaning, outcome (fail / skip / skip + stop / info) and the first thing to check. A unit test fails if code uses a keyword missing here. |
 | [docs/ci_jobs.md](docs/ci_jobs.md) | **CI jobs.** When CI runs, overlapping runs, the regression run `ci-regression-run` (lint, unit, P0 → P1 → P2 / P3 / P4, quality gate), the standalone jobs, and the local command for each job. |
 | [CHANGELOG.md](CHANGELOG.md) | **Change log.** What changed in each commit, newest first, with the CI runs that found the problems it fixed. |
@@ -472,7 +507,7 @@ Design document sections:
 |---|---|---|
 | §1 | Purpose and scope | n/a |
 | §2 | Architecture: tools, dependencies between them, repository layout trade-off | all packages |
-| §3 | Configuration: option table, precedence (argument > CLI > env > `.env` > default), secrets | `emi_harness/options.py`, each tool's `settings.py` |
+| §3 | Configuration: option table, precedence (argument > CLI > env > `.env` > default), secrets | `emi_config/options.py`, each tool's `settings.py`, `emi_harness/options.py` |
 | §4 | Identifiers: TestRail case IDs `C<number>`, run IDs, addresses, marker headers | `emi_api/identity.py`, `emi_sender/compose.py` |
 | §5 | Reader: transport, connections, folder accessibility, waiting and matching, retries, MIME and CTA links, tokens, inventory | `emi_reader/` |
 | §6 | Sender: templates, tokens, batches and distributions, delivery (SMTP / `APPEND`), validation, manifest and exit codes | `emi_sender/` |
@@ -511,6 +546,7 @@ AP_IMAP_EmailClient/
 │   └── design/
 │       ├── phase0_email_client_ambiguities.md   # Ambiguity register and spike evidence
 │       └── email_client_harness_design.md       # Phase 2 design document
+├── emi_config/                # One option table: names, flags, EMI_* variables, defaults, precedence
 ├── emi_reader/                # IMAP reader: wait for a test's email, extract the CTA link
 ├── emi_sender/                # Sender: realistic emails from the samples, batches, SMTP / APPEND
 │   └── templates/             # JSON templates (activation, invitation, generic)
@@ -525,6 +561,7 @@ AP_IMAP_EmailClient/
 │   ├── emi_reader/
 │   ├── emi_sender/
 │   ├── emi_greenmail/
+│   ├── emi_config/
 │   ├── emi_test_broker/
 │   ├── emi_api/
 │   ├── emi_harness/
@@ -691,27 +728,26 @@ account. Real servers limit this: Gmail allows about **15** simultaneous IMAP co
 * If the server still refuses a connection as over the limit, the client retries with
   backoff and logs the keyword `READER_IMAP_CONNECTION_LIMIT`.
 * Parallel runs never pick up each other's emails: every address carries the test ID and the
-  run ID. No run purges the shared mailbox while others may be running.
-
-## Designed but Not Yet Implemented
-
-These features are in the design and have a register decision, but the code does not do them yet.
-Each one is a "Partial" row in [docs/rtm.md](docs/rtm.md), which says exactly what is built today.
-
-| Feature | Today | RTM |
-|---|---|---|
-| **One shared poll loop** in the test broker serving every waiting test (design §5.4) | Each wait polls the mailbox on its own pooled connection, within the `max_connections` budget | R-RD-05 |
-| **A dedicated IMAP connection per worker** in `inprocess` mode | Waits take a connection from a pool inside the test process, so a worker is not tied to one connection | R-RD-03 |
-| **Several mail accounts**, and skipping a test whose expected folder is not accessible (`READER_MAILBOX_EXPECTED_FOLDER_INACCESSIBLE`) | One account; an inaccessible folder appears in the accessibility matrix | R-RD-04 |
-| **Recipient field combinations** in one email (for example `To` and `Cc`) | One recipient field per email | R-SD-04 |
-| **The sender CLI going through the broker** by default, with `--direct` to bypass it | The sender CLI always sends directly | R-SD-06 |
-| **One option table for every CLI** (sender and broker as well as the harness) | The harness CLI and the pytest plugin share it; the sender and broker CLIs define their own options | R-CFG-02 |
-| **Setting sources in the broker's `/health`** | `/health` shows values; the sources are in each job's `settings.json` | R-CFG-04 |
-| **`docs/keywords.md` generated from the code** | Written by hand; a unit test checks that every keyword in the code is in it | R-KW-01 |
-| **Queueing jobs that share a real mailbox** (Gmail) instead of running them side by side | No Gmail job exists yet; every CI job uses its own Greenmail | R-CI-01 |
-| **Functional tests for** `Delivered-To` / `X-Original-To` recipients, field combinations, accessibility failures and link variants | Not in the functional suite: the email templates cannot produce these cases yet, and combinations need R-SD-04 | R-TS-03 |
+  run ID. No run purges the shared mailbox while others may be running; a run may delete its own
+  mail (`--emi-delete-own-mail on`), which leaves every other run's mail in place.
+* The test broker serves every waiting test from **one shared poller**: one IMAP connection that, each
+  cycle, searches for all waiting addresses together and fetches the matches in one command. A
+  wait therefore costs no connection of its own, and many waits cost about as much as one.
 
 ## What Was Left Out
+
+**Designed, then decided not to build** (register AMB-86; each is a "Closed, not built" row in
+[docs/rtm.md](docs/rtm.md)):
+
+| Feature | Why not | RTM |
+|---|---|---|
+| **A dedicated IMAP connection per worker** in `inprocess` mode | `inprocess` runs the same broker service inside the test process, and its shared poller serves every wait on one connection (AMB-80); a connection per worker would only add connections | R-RD-03 |
+| **Several mail accounts** in one run | The tests share one mailbox by design; each folder of that account is probed, and a test can name the folder it expects mail in (`expected_folder`, AMB-85) | R-RD-04 |
+| **`docs/keywords.md` generated from the code** | Written by hand, with the meaning and the first thing to check, which code cannot supply; a unit test fails if the code uses a keyword missing from it | R-KW-01 |
+| **Queueing CI jobs that share a real mailbox** (Gmail) | No Gmail job exists; every CI job starts its own Greenmail | R-CI-01 |
+| **Functional tests for** `X-Original-To`, the transport as a parameter, unmarked manual mail, accessibility failures and link variants | The sender cannot produce `X-Original-To`; the transport is chosen per run; the templates cannot produce the link variants; unit tests cover links (100020-100028) and accessibility (100050-100053, 100094) | R-TS-03 |
+
+**Not part of the design:**
 
 * **Separate repositories for the tools, the harness and the test cases.** Ideally each would be its own
   repository with versioned releases. A change to one would then be checked against the last green

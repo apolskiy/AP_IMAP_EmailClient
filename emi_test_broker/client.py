@@ -94,7 +94,7 @@ def spawn_command(settings: BrokerSettings) -> list[str]:
     Returns:
         The argument vector.
     """
-    return [sys.executable, "-m", "emi_test_broker", "--port", str(settings.port),
+    return [sys.executable, "-m", "emi_test_broker", "--test-broker-port", str(settings.port),
             "--max-connections", str(settings.max_connections), "--log-dir", str(settings.log_dir.resolve()),
             "--state-dir", str(settings.state_dir.resolve()),
             "--settings-file", str(settings.settings_file.resolve()), "serve"]
@@ -281,7 +281,7 @@ class BrokerClient:
 
     def wait_for_link(  # pylint: disable=too-many-arguments
         self, address: str, cta: Cta, *, timeout: float = 60.0, test_id: str | None = None,
-        run_id: str | None = None, match_fields: tuple[str, ...] | None = None,
+        run_id: str | None = None, match_fields: tuple[str, ...] | None = None, expected_folder: str | None = None,
     ) -> str:
         """Wait for an email with the given button and return its link.
 
@@ -292,18 +292,20 @@ class BrokerClient:
             test_id: Required test marker.
             run_id: Required run marker.
             match_fields: Recipient fields the address must appear in; ``To`` only by default.
+            expected_folder: A configured folder the wait needs to read (AMB-85); None for no such check.
 
         Returns:
             The CTA link.
         """
         payload = {"address": address, "cta": cta_to_json(cta), "mode": "link", "timeout": timeout,
-                   "test_id": test_id, "run_id": run_id, "match_fields": _fields(match_fields)}
+                   "test_id": test_id, "run_id": run_id, "match_fields": _fields(match_fields),
+                   "expected_folder": expected_folder}
         return str(self._wait(payload, timeout)["link"])
 
     def wait_for_emails(  # pylint: disable=too-many-arguments
         self, address: str, *, cta: Cta | None = None, count: int = 1, timeout: float = 60.0,
         test_id: str | None = None, run_id: str | None = None, match_fields: tuple[str, ...] | None = None,
-        settle_window: float | None = None,
+        settle_window: float | None = None, expected_folder: str | None = None,
     ) -> list[ReceivedEmail]:
         """Wait until exactly ``count`` matching emails are present.
 
@@ -317,13 +319,15 @@ class BrokerClient:
             match_fields: Recipient fields the address must appear in; ``To`` only by default.
             settle_window: Seconds to watch for extra emails after ``count`` arrived; the reader's default
                 (2 s) when None; 0 for mail delivered before the wait.
+            expected_folder: A configured folder the wait needs to read (AMB-85); None for no such check.
 
         Returns:
             The emails, oldest first.
         """
         payload = {"address": address, "cta": cta_to_json(cta), "mode": "emails", "count": count,
                    "timeout": timeout, "test_id": test_id, "run_id": run_id,
-                   "match_fields": _fields(match_fields), "settle_window": settle_window}
+                   "match_fields": _fields(match_fields), "settle_window": settle_window,
+                   "expected_folder": expected_folder}
         return [received_from_json(item) for item in self._wait(payload, timeout)["emails"]]
 
     @property
@@ -384,18 +388,20 @@ class BrokerClient:
         self._post("/lease/release", {"run_id": run_id}, _HEALTH_TIMEOUT_SEC * 5)
 
     def purge(self, *, dry_run: bool = False, older_than_days: int | None = None,
-              everything: bool = False) -> dict[str, Any]:
-        """Purge the shared mailbox (refused while runs are active).
+              everything: bool = False, run_id: str | None = None) -> dict[str, Any]:
+        """Purge the shared mailbox (refused while runs are active; with ``run_id``, while that run is).
 
         Args:
             dry_run: Count only.
             older_than_days: Only mail older than this many days.
             everything: Every email, not only EMI-marked mail.
+            run_id: Only this run's mail, every worker's (AMB-79).
 
         Returns:
             Counts per folder.
         """
-        payload = {"dry_run": dry_run, "older_than_days": older_than_days, "everything": everything}
+        payload = {"dry_run": dry_run, "older_than_days": older_than_days, "everything": everything,
+                   "run_id": run_id}
         return self._post("/purge", payload, _CALL_MARGIN_SEC * 4)
 
     # --- helpers ---------------------------------------------------------------------------------------

@@ -12,13 +12,20 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+from emi_config import Option, Resolved, merge, resolve
 from emi_reader import ImapSettings
 from emi_reader import Security as ImapSecurity
 from emi_reader.settings import GREENMAIL_TEST_PASSWORD
+from emi_reader.settings import OPTIONS as READER_OPTIONS
+from emi_reader.settings import imap_settings_from
 from emi_sender import SenderSettings, Transport
 from emi_sender import Security as SmtpSecurity
+from emi_sender.settings import OPTIONS as SENDER_OPTIONS
+from emi_sender.settings import sender_settings_from
 
-BROKER_VERSION = "1.1.0"  # 1.1.0: POST /emails (AMB-74) and the wait's "inventory" (AMB-76)
+BROKER_VERSION = "1.3.0"  # 1.1.0: POST /emails (AMB-74), the wait's "inventory" (AMB-76); 1.2.0: shared
+# poller for every wait and the run-scoped purge (AMB-79, AMB-80); 1.3.0: recipient field combinations on
+# /send (AMB-82), setting sources on /health (R-CFG-04), expected_folder on /wait (AMB-85)
 TOKEN_HEADER = "X-EMI-Broker-Token"
 
 
@@ -36,6 +43,8 @@ class BrokerSettings:  # pylint: disable=too-many-instance-attributes
         idle_shutdown_sec: The broker stops after this long without requests and without leases.
         log_dir: Directory of the dated log files.
         state_dir: Directory of the per-start state file (pid, token, version).
+        sources: Where each option's value came from (option name -> ``cli``, ``env``, ``.env``, ``default``
+            or ``argument``), shown by ``/health`` (R-CFG-04). Not part of comparisons or the config hash.
     """
 
     host: str = "127.0.0.1"
@@ -47,6 +56,7 @@ class BrokerSettings:  # pylint: disable=too-many-instance-attributes
     idle_shutdown_sec: float = 1800.0
     log_dir: Path = Path("logs")
     state_dir: Path = field(default_factory=lambda: Path(tempfile.gettempdir()) / "emi_test_broker")
+    sources: dict[str, str] = field(default_factory=dict, compare=False, repr=False)
 
     def __post_init__(self) -> None:
         """Validate ranges.
@@ -100,12 +110,42 @@ class BrokerSettings:  # pylint: disable=too-many-instance-attributes
         return hashlib.sha256(json.dumps(material, sort_keys=True).encode()).hexdigest()[:16]
 
 
+OPTIONS: tuple[Option, ...] = merge(READER_OPTIONS, SENDER_OPTIONS, (
+    Option(name="test_broker_port", env="EMI_TEST_BROKER_PORT", kind="int", default=8025, minimum=1,
+           maximum=65535, help="test broker port"),
+    Option(name="max_connections", env="EMI_MAX_CONNECTIONS", kind="int", default=10, minimum=1, maximum=100,
+           help="IMAP/SMTP connections per host (Gmail allows about 15 per account)"),
+    Option(name="log_dir", env="EMI_LOG_DIR", kind="str", default="logs", help="test broker log directory"),
+))
+
+
+def broker_settings_from(resolved: Resolved, **overrides: Any) -> BrokerSettings:
+    """The broker settings a resolved table describes.
+
+    Args:
+        resolved: Values of a table that includes :data:`OPTIONS`.
+        **overrides: Settings no option carries (``state_dir``); None values are ignored.
+
+    Returns:
+        The settings.
+
+    Raises:
+        ValueError: If a value is out of range.
+    """
+    values: dict[str, Any] = {"port": resolved["test_broker_port"], "imap": imap_settings_from(resolved),
+                              "smtp": sender_settings_from(resolved), "max_connections": resolved["max_connections"],
+                              "log_dir": Path(resolved["log_dir"]),
+                              "sources": {option.name: str(resolved.sources[option.name]) for option in OPTIONS}}
+    values.update({key: value for key, value in overrides.items() if value is not None})
+    return BrokerSettings(**values)
+
+
 def settings_from_env(environ: Mapping[str, str], **overrides: Any) -> BrokerSettings:
-    """Build broker settings from ``EMI_*`` variables (README names; ``.env`` already loaded).
+    """Build broker settings from ``EMI_*`` variables alone (``.env`` already loaded by the caller).
 
     Args:
         environ: The environment.
-        **overrides: Explicit values (CLI options), which win over the environment.
+        **overrides: Settings no option carries (``state_dir``).
 
     Returns:
         The settings.
@@ -113,29 +153,7 @@ def settings_from_env(environ: Mapping[str, str], **overrides: Any) -> BrokerSet
     Raises:
         ValueError: If a value is out of range or not a number.
     """
-    def _get(name: str) -> str | None:
-        return environ.get(name) or None
-
-    def _int(name: str) -> int | None:
-        value = _get(name)
-        return int(value) if value is not None else None
-
-    imap = ImapSettings(
-        host=_get("EMI_IMAP_HOST") or "127.0.0.1", port=_int("EMI_IMAP_PORT"),
-        security=ImapSecurity(_get("EMI_IMAP_SECURITY") or "plain"), username=_get("EMI_IMAP_USER") or "qa",
-        password=_get("EMI_IMAP_PASSWORD") or GREENMAIL_TEST_PASSWORD)
-    smtp = SenderSettings(
-        host=_get("EMI_SMTP_HOST") or "127.0.0.1", smtp_port=_int("EMI_SMTP_PORT"),
-        security=SmtpSecurity(_get("EMI_SMTP_SECURITY") or "plain"), username=_get("EMI_SMTP_USER") or "qa",
-        password=_get("EMI_SMTP_PASSWORD") or GREENMAIL_TEST_PASSWORD,
-        smtp_login=_get("EMI_SMTP_PASSWORD") is not None)
-    values: dict[str, Any] = {"imap": imap, "smtp": smtp}
-    if (port := _int("EMI_TEST_BROKER_PORT")) is not None:
-        values["port"] = port
-    if (limit := _int("EMI_MAX_CONNECTIONS")) is not None:
-        values["max_connections"] = limit
-    values.update({key: value for key, value in overrides.items() if value is not None})
-    return BrokerSettings(**values)
+    return broker_settings_from(resolve(OPTIONS, environ=environ), **overrides)
 
 
 def settings_to_json(settings: BrokerSettings) -> dict[str, Any]:

@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from emi_sender.batch import BatchPlan, BatchRequest, PlannedEmail, plan_batch
-from emi_sender.compose import Kind, Marker, Template, builtin_templates, compose
+from emi_sender.compose import Kind, Marker, Template, builtin_templates, compose, fields_label
 from emi_sender.delivery import UNREACHABLE_KEYWORDS, Delivery, deliver_with_retry, make_delivery
 from emi_sender.errors import DeliveryError
 from emi_sender.keywords import SenderKeyword
@@ -243,7 +243,7 @@ class Sender:
         started = self._clock()
         composed = compose(self._templates[email.kind], email.address, field=email.field, marker=marker,
                            sent_at=datetime.now(UTC), secret=self._secret)
-        common = {"index": email.index, "address": composed.address, "field": str(email.field),
+        common = {"index": email.index, "address": composed.address, "field": fields_label(email.field),
                   "kind": str(email.kind), "link": composed.link, "jti": composed.jti,
                   "message_id": composed.message_id}
         try:
@@ -263,5 +263,5 @@ class Sender:
         """Entry for an email not attempted: the server is unreachable, or the batch budget ran out."""
         keyword = fatal.primary if fatal is not None else SenderKeyword.BATCH_TIMEOUT
         reason = "not attempted: server unreachable" if fatal is not None else "batch time budget exceeded"
-        return ManifestEntry(index=email.index, address=email.address, field=str(email.field),
+        return ManifestEntry(index=email.index, address=email.address, field=fields_label(email.field),
                              kind=str(email.kind), status="failed", keyword=keyword, error=reason)

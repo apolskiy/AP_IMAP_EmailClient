@@ -13,7 +13,8 @@ that fault; every one must fail with an expected keyword, otherwise it is a **ga
 suite would let through). ``stability`` repeats a selection on a healthy setup; a test that does not pass in
 every repeat is **flaky** or **failing** (a false negative), and a test or step close to its time limit is a
 **thin margin**. Each run is an ordinary harness job with its own run ID; the summary goes to
-``reports/validity/<stamp>/``.
+``reports/validity/<stamp>/``. A stability repeat of every priority runs the regression chain (P0 to P4)
+under one run ID, and every stability job deletes its run's mail when it ends (AMB-79).
 
 Exit codes: 0 nothing found; 1 gaps or findings; 2 a run aborted or produced no results; 4 usage error.
 """
@@ -37,6 +38,7 @@ from emi_harness.results import job_dir, load_results
 EXIT_CLEAN, EXIT_FOUND, EXIT_NO_RESULTS, EXIT_USAGE = 0, 1, 2, 4
 _ABORTED = 2
 _DEFAULT_CATCHES = "tests.functional.validity"
+_CHAIN = ("P0", "P1", "P2", "P3", "P4")  # the regression chain's jobs, in order (design §12)
 
 # Runs one harness CLI job: (CLI arguments, extra environment) -> exit code.
 JobRunner = Callable[[list[str], Mapping[str, str]], int]
@@ -164,11 +166,44 @@ def _subprocess_runner(arguments: list[str], extra: Mapping[str, str]) -> int:
 
 
 def _job(runner: JobRunner, reports: Path, arguments: list[str], extra: Mapping[str, str],
-         job: str) -> tuple[int, list[TestOutcome]]:
-    """Run one job with a new run ID; its exit code and results."""
-    run_id = str(RunId.new(0))
+         job: str, run_id: str | None = None) -> tuple[int, list[TestOutcome]]:
+    """Run one job (with a new run ID unless given); its exit code and results."""
+    run_id = run_id or str(RunId.new(0))
     code = runner(arguments, {**extra, "EMI_RUN_ID": run_id})
     return code, load_results(job_dir(reports, run_id, job))
+
+
+def stability_jobs(priority: str, narrowed: bool) -> tuple[str, ...]:
+    """The jobs of one stability repeat (AMB-79): the regression chain for every priority, else one job.
+
+    Each job of the chain runs on a mailbox holding no more than its own mail, since every job deletes
+    its run's mail when it ends; one job of all 1,019 tests slowed until tests ran out of time.
+
+    Args:
+        priority: The ``--priority`` asked for.
+        narrowed: Whether ``--test``, ``--file`` or ``--keyword`` narrows the selection (then one job, since
+            most chain jobs would select nothing).
+
+    Returns:
+        Job names in run order.
+    """
+    if priority.lower() == "all" and not narrowed:
+        return _CHAIN
+    return (priority,)
+
+
+def _repeat(runner: JobRunner, reports: Path, base: list[str], jobs: Sequence[str]) -> tuple[int, list[TestOutcome]]:
+    """One stability repeat: its jobs under one run ID, so later jobs see earlier results (dependencies);
+    the first abort stops the repeat, as it stops the regression chain."""
+    run_id = str(RunId.new(0))
+    outcomes: list[TestOutcome] = []
+    for job in jobs:
+        arguments = [*base, "--priority", job, "--emi-delete-own-mail", "on"]
+        code, own = _job(runner, reports, arguments, {}, job, run_id)
+        outcomes.extend(own)
+        if code == _ABORTED:
+            return code, outcomes
+    return 0, outcomes
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -271,16 +306,17 @@ def _stability(args: argparse.Namespace, runner: JobRunner, reports: Path, summa
     if args.repeat < 2:
         print("--repeat must be at least 2", file=sys.stderr)
         return EXIT_USAGE
-    arguments = [*args.paths, "--priority", args.priority, "-n", str(args.workers)]
+    arguments = [*args.paths, "-n", str(args.workers)]
     for name in args.test:
         arguments.extend(("--test", name))
     if args.file:
         arguments.extend(("--file", args.file))
     for keyword in args.keyword:
         arguments.extend(("--keyword", keyword))
+    jobs = stability_jobs(args.priority, bool(args.test or args.file or args.keyword))
     repeats: list[list[TestOutcome]] = []
-    for _repeat in range(args.repeat):
-        code, outcomes = _job(runner, reports, arguments, {}, args.priority)
+    for _round in range(args.repeat):
+        code, outcomes = _repeat(runner, reports, arguments, jobs)
         if code == _ABORTED or not outcomes:
             print(f"a repeat aborted or produced no results (exit {code})", file=sys.stderr)
             return EXIT_NO_RESULTS

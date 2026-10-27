@@ -17,6 +17,7 @@ Each tool has its own folder, its own unit-test folder and its own standalone CI
 * `emi_sender/`: Email sender client (JSON templates, SMTP/APPEND delivery, batch distributions).
 * `emi_test_broker/`: Test broker: background process (default port 8025) that calls the sender and reader on behalf of all runs on a machine and shares their connections and log.
 * `emi_greenmail/`: Greenmail client (readiness, users, purge via Greenmail's REST API).
+* `emi_config/`: The one option table every CLI and settings object is generated from (names, flags, `EMI_*` variables, defaults, precedence); every package may import it.
 * `emi_api/`: Central public API (`EmiApi`), the single entry point tests call.
 * `emi_harness/`: Test runner orchestration, parallel execution logic, keyword loggers, and dependency graph evaluators.
 * `unittests/`: Core unit tests, one folder per tool:
@@ -24,6 +25,7 @@ Each tool has its own folder, its own unit-test folder and its own standalone CI
   * `unittests/emi_sender/`: Sender unit tests (CI job `unit-emi-sender`).
   * `unittests/emi_test_broker/`: Test broker unit tests (CI job `unit-emi-test-broker`).
   * `unittests/emi_greenmail/`: Greenmail client unit tests (CI job `unit-emi-greenmail`).
+  * `unittests/emi_config/`: Option table unit tests (CI job `unit-emi-config`; a change to `emi_config/` runs every tool's job).
   * `unittests/emi_harness/`: Harness unit tests (CI job `unit-emi-harness`).
   * `unittests/emi_api/`: Central public API (`EmiApi`) unit tests (main pipeline only).
 * `tests/`: Functional and non-functional test partitions scaling to 1,000+ test cases.

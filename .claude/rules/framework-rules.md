@@ -14,7 +14,7 @@ changes do not trigger CI. **Every CI job can also be started manually** at any 
 P0, P1, P2, P3 and P4 jobs run, always after lint and unit tests):
 1. **Gate 1 - Static Analysis**: `pylint --rcfile=.pylintrc` across all modules achieving **10.00/10**.
 2. **Gate 2 - Unit Tests (mandatory)**: every unit-test folder (`unittests/emi_reader/`, `unittests/emi_sender/`,
-   `unittests/emi_test_broker/`, `unittests/emi_greenmail/`, `unittests/emi_harness/`, `unittests/emi_api/`) on Windows and Ubuntu matrix jobs. All must pass before any functional job starts; there is no point
+   `unittests/emi_test_broker/`, `unittests/emi_greenmail/`, `unittests/emi_config/`, `unittests/emi_harness/`, `unittests/emi_api/`) on Windows and Ubuntu matrix jobs. All must pass before any functional job starts; there is no point
    running P0-P4 if the harness or the tools are broken.
 3. **Gate 3 - Functional Tests (Priority Sub-Jobs)**: once Gate 2 passes, the functional jobs run as a
    **chain: P0 → P1 → P2, P3 and P4** (the last three side by side, each its own job). Each job runs after
@@ -39,6 +39,7 @@ reported but never turn the project status red.
 * `unit-emi-sender`: `emi_sender/` or `unittests/emi_sender/`
 * `unit-emi-test-broker`: `emi_test_broker/` or `unittests/emi_test_broker/`
 * `unit-emi-greenmail`: `emi_greenmail/` or `unittests/emi_greenmail/`
+* `unit-emi-config`: `emi_config/` or `unittests/emi_config/`; a change to `emi_config/` also starts every tool's job
 * `unit-emi-harness`: `emi_harness/` or `unittests/emi_harness/`
 * `unittests/netfaults/` (the fault proxy and simulated servers) starts `unit-emi-reader` and `unit-emi-sender`.
 * `unit-outage`: `unittests/outage/`, weekly and by hand, Ubuntu only. It stops and restarts its own Greenmail

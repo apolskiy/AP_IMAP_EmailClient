@@ -46,6 +46,54 @@ class Field(StrEnum):
     BCC = "bcc"
 
 
+# One recipient field, or several at once (AMB-82); a single field stays a plain Field.
+Fields = Field | tuple[Field, ...]
+_FIELD_ORDER = (Field.TO, Field.CC, Field.BCC)
+_FIELD_SEPARATORS = re.compile(r"[,+]")
+
+
+def parse_fields(value: object) -> Fields:
+    """One or more recipient fields: a field, ``"to"``, ``"to,cc"``, ``"to+cc"`` or a list of them.
+
+    Args:
+        value: The fields as given (CLI, batch file, wire format or code).
+
+    Returns:
+        A single :class:`Field`, or a tuple of several in header order (To, Cc, Bcc), each once.
+
+    Raises:
+        InvalidInputError: ``CASE_CONDITION_INVALID_INPUT`` for an unknown field or none at all.
+    """
+    if isinstance(value, str):
+        names = _FIELD_SEPARATORS.split(value)
+    elif isinstance(value, (list, tuple)):
+        names = [str(item) for item in value]
+    else:
+        names = []
+    try:
+        chosen = {Field(name.strip().lower()) for name in names if name.strip()}
+    except ValueError as error:
+        raise _invalid(f"recipient fields must be to, cc, bcc or a combination, got {value!r}",
+                       field="field", value=repr(value)) from error
+    if not chosen:
+        raise _invalid(f"at least one recipient field is required, got {value!r}", field="field", value=repr(value))
+    ordered = tuple(item for item in _FIELD_ORDER if item in chosen)
+    return ordered[0] if len(ordered) == 1 else ordered
+
+
+def fields_label(value: object) -> str:
+    """The text form of one or more fields (``"to"``, ``"to+cc"``), for manifests and the wire format.
+
+    Args:
+        value: Fields in any form :func:`parse_fields` accepts.
+
+    Returns:
+        The fields joined by ``+``.
+    """
+    fields = parse_fields(value)
+    return "+".join(str(item) for item in (fields if isinstance(fields, tuple) else (fields,)))
+
+
 @dataclass(frozen=True)
 class Template:
     """A JSON template.
@@ -84,7 +132,7 @@ class ComposedEmail:
     message: EmailMessage
     kind: Kind
     address: str
-    field: Field
+    field: Fields
     link: str | None
     jti: str | None
     message_id: str
@@ -190,17 +238,16 @@ def _marker_line(test_id: str, run_id: str) -> str:
     return f"EMI-Test: {test_id} run={run_id}"
 
 
-def _set_recipient(message: EmailMessage, address: str, field: Field, display_name: str) -> None:
-    """Put the test address into the requested field; Bcc leaves only a Delivered-To trace."""
+def _set_recipient(message: EmailMessage, address: str, fields: Fields, display_name: str) -> None:
+    """Put the test address into each requested field; Bcc leaves only a Delivered-To trace."""
+    chosen = fields if isinstance(fields, tuple) else (fields,)
     for header in ("To", "Cc", "Bcc", "Delivered-To"):
         del message[header]
-    if field is Field.TO:
-        message["To"] = Address(display_name=display_name, addr_spec=address)
-        return
-    message["To"] = _UNDISCLOSED
-    if field is Field.CC:
+    message["To"] = (Address(display_name=display_name, addr_spec=address) if Field.TO in chosen
+                     else _UNDISCLOSED)
+    if Field.CC in chosen:
         message["Cc"] = address
-    else:
+    if Field.BCC in chosen:
         # Bcc is invisible in the received headers; Gmail stamps Delivered-To. Emulated (AMB-07).
         message["Delivered-To"] = address
 
@@ -267,7 +314,7 @@ def compose(  # pylint: disable=too-many-arguments
     template: Template,
     address: str,
     *,
-    field: Field = Field.TO,
+    field: Fields = Field.TO,
     marker: Marker | None = None,
     sent_at: datetime,
     secret: bytes = TEST_ONLY_SECRET,
@@ -277,7 +324,7 @@ def compose(  # pylint: disable=too-many-arguments
     Args:
         template: What kind of email.
         address: The test address.
-        field: Recipient field for the address.
+        field: Recipient field, or several, for the address (AMB-82).
         marker: Test/run marker (headers and body line).
         sent_at: The ``Date`` (timezone-aware).
         secret: Token signing key (test-only by default).
@@ -286,6 +333,7 @@ def compose(  # pylint: disable=too-many-arguments
         The composed email.
     """
     address = validate_address(address)
+    field = parse_fields(field)
     marker = marker or Marker()
     if template.kind is Kind.GENERIC:
         message, new_token, display_name = _from_text(template, marker), None, ""

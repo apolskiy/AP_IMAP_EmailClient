@@ -7,6 +7,56 @@ reasoning behind each decision is in [CLAUDE_LOG.md](CLAUDE_LOG.md).
 
 ## Unreleased
 
+### Added
+* **A run can delete its own mail and nothing else (AMB-79).** `python -m emi_test_broker purge --run-id
+  <run>`, `EmiApi.delete_run_mail()` and the harness option `--emi-delete-own-mail on` delete the mail of
+  one run, every worker's, and keep every other run's. It is refused only while that run is active, so it
+  is safe next to other runs. `test-validity` run 40451473560 had filled Greenmail's INBOX to about 15,600
+  messages, and its second stability repeat timed out.
+* **One shared poller serves every wait in the test broker (AMB-80).** One IMAP connection searches for
+  all waiting addresses at once and fetches the matches in one command per cycle, so a wait no longer
+  takes a connection or a fetch of its own. On Greenmail every fetch costs more as the folder fills
+  (about 6 s at 15,000 messages), and per-wait polling made the batch tests take 160-213 s against their
+  90 s step limit; with the poller a 10-email batch wait took 13.5 s at the same size. Broker version
+  1.2.0.
+* **One option table for every tool (AMB-81), in the new package `emi_config/`.** Each tool's
+  `settings.py` declares its settings once, and the sender, test broker and harness command lines and
+  the pytest options are generated from those rows, so a setting has one name, one `EMI_*` variable and
+  one default everywhere, and each tool works on its own outside the tests. New unit job
+  `unit-emi-config`; a change to `emi_config/` runs every tool's job.
+* **The broker's `/health` shows where each setting came from** (argument, command line, environment,
+  `.env` or default), so a wrong value can be traced without the harness's `settings.json` (R-CFG-04).
+* **Recipient field combinations (AMB-82).** One email can carry the address in several fields
+  (`--field to,cc` on the sender, `recipient_field=(Field.TO, Field.CC)` in a batch); the manifest names
+  them as `to+cc`. Broker version 1.3.0.
+* **15 functional cases (AMB-83)**: every combination of `To`, `Cc` and `Bcc` for each email kind, found
+  on each of its fields and missed on a field outside it, and an address in `Delivered-To` alone. Live
+  against Greenmail all 24 recipient-field cases pass, and the two field faults are caught by all 30 of
+  their catching tests.
+* **`--via-broker` on the sender (AMB-84)** sends through the shared test broker, starting it if needed;
+  without it the sender sends directly and does not need the broker.
+* **`expected_folder` on the reader's waits (AMB-85)**, through `EmiApi` and the broker: a test that
+  expects mail in a folder it cannot read (for example `Spam`) is skipped at once with
+  `READER_MAILBOX_EXPECTED_FOLDER_INACCESSIBLE` instead of waiting out its timeout.
+
+### Changed
+* **The stability check runs P0, P1, P2, P3 and P4 as separate jobs (AMB-79)**, one after another under
+  one run ID, each deleting its own mail, so the mailbox never grows across the whole suite.
+* **Renamed the sender's and broker's command-line flags** to the option table's names: `--host` is
+  `--smtp-host`, `--security` is `--smtp-security`, `--transport` is `--sender-transport`, and the
+  broker's `--port` is `--test-broker-port`. The old names were the tools' own, and differed from the
+  harness and the `EMI_*` variables.
+* **Closed the remaining design gaps that will not be built (AMB-86)**: a connection per worker in
+  `inprocess` mode (the shared poller replaced it), several mail accounts, a generated
+  `docs/keywords.md`, a queue for jobs sharing Gmail, and the functional cases that the unit tests
+  cover or the sender cannot produce. The README's "Designed but Not Yet Implemented" section became
+  part of "What Was Left Out", and the README gained a section on using the sender and the broker on
+  their own.
+* README test counts (479 unit tests, 66 network tests, 1,034 functional tests), design §5.3, §5.9 and
+  §13.3, CLAUDE.md's folder list, `docs/ci_jobs.md`, and RTM rows R-CFG-02, R-CFG-04, R-KW-01, R-RD-03,
+  R-RD-04, R-RD-05, R-SD-04, R-SD-06, R-TB-02, R-TB-08, R-API-01, R-CI-01, R-TS-01, R-TS-03, R-TV-01,
+  R-TV-02 and R-TV-04.
+
 ## a65e11a (2026-10-26)
 
 ### Changed

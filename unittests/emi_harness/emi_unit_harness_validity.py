@@ -20,6 +20,7 @@ from emi_harness.validity import (
     analyse_stability,
     evaluate_catches,
     main,
+    stability_jobs,
 )
 from tests.functional.validity import CATCHES
 
@@ -115,6 +116,25 @@ class TestEMIHarnessValidity:
         steady = _runner(reports, lambda _call: [_outcome("C1")], steady_calls)
         assert main(["stability", "--repeat", "2", "--test", "C1"], runner=steady) == EXIT_CLEAN
         assert main(["stability", "--repeat", "1"], runner=steady) == EXIT_USAGE
+
+    def EMI_HARNESS_UNIT_200165_stability_runs_the_chain_and_deletes_mail(self, reports: Path) -> None:
+        """Every priority: P0 to P4 under one run ID per repeat, each job deleting its run's mail; an abort
+        ends the repeat as it ends the regression chain; a narrowed selection stays one job (AMB-79)."""
+        calls: list[tuple[list[str], str]] = []
+
+        def chain(arguments: list[str], extra: Mapping[str, str]) -> int:
+            job = arguments[arguments.index("--priority") + 1]
+            calls.append((arguments, extra["EMI_RUN_ID"]))
+            ResultsWriter(job_dir(reports, extra["EMI_RUN_ID"], job), "main").write(_outcome(f"C{job}"))
+            return 2 if job == "P1" and len(calls) > 5 else 0
+
+        assert main(["stability", "--repeat", "2"], runner=chain) == EXIT_NO_RESULTS
+        jobs = [arguments[arguments.index("--priority") + 1] for arguments, _run in calls]
+        assert jobs == ["P0", "P1", "P2", "P3", "P4", "P0", "P1"]  # the second repeat aborted in P1
+        assert len({run for _arguments, run in calls[:5]}) == 1 and calls[5][1] != calls[0][1]
+        assert all(arguments[-2:] == ["--emi-delete-own-mail", "on"] for arguments, _run in calls)
+        assert stability_jobs("all", narrowed=True) == ("all",) and stability_jobs("P2", narrowed=False) == ("P2",)
+        assert stability_jobs("ALL", narrowed=False) == ("P0", "P1", "P2", "P3", "P4")
 
     def EMI_HARNESS_UNIT_200146_catch_table_is_consistent(self) -> None:
         """Every fault has catching tests, every case ID is unique within its fault and is a functional ID."""

@@ -6,11 +6,14 @@ from emi_sender.batch import BatchPlan, BatchRequest, Order, PlannedEmail, Prese
 from emi_sender.compose import (
     ComposedEmail,
     Field,
+    Fields,
     Kind,
     Marker,
     Template,
     builtin_templates,
     compose,
+    fields_label,
+    parse_fields,
     testrail_case_id,
 )
 from emi_sender.errors import DeliveryError, InvalidInputError, SenderError
@@ -24,6 +27,7 @@ __all__ = [
     "ComposedEmail",
     "DeliveryError",
     "Field",
+    "Fields",
     "InvalidInputError",
     "Kind",
     "Manifest",
@@ -42,6 +46,8 @@ __all__ = [
     "Transport",
     "builtin_templates",
     "compose",
+    "fields_label",
+    "parse_fields",
     "plan_batch",
     "testrail_case_id",
 ]

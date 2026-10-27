@@ -54,10 +54,14 @@ CATCHES: dict[str, tuple[Catch, ...]] = {
               (_NOT_RECEIVED,)),
         # Sent in To instead of Cc/Bcc, so the To-only wait that must find nothing finds it.
         Catch((_case(402000, emi_func_fields.CASES, "activation", "cc", "to"),
-               _case(402000, emi_func_fields.CASES, "invitation", "bcc", "to")), (_VERIFICATION,)),
+               _case(402000, emi_func_fields.CASES, "invitation", "bcc", "to"),
+               _case(402100, emi_func_fields.COMBINATION_CASES, "generic", "cc+bcc"), "C402200"),
+              (_VERIFICATION,)),
     ),
     "reader-any-field": (
-        Catch(tuple(_case(402000, emi_func_fields.CASES, *value) for value in emi_func_fields.CASES),
+        Catch((*(_case(402000, emi_func_fields.CASES, *value) for value in emi_func_fields.CASES),
+               *(_case(402100, emi_func_fields.COMBINATION_CASES, *value)
+                 for value in emi_func_fields.COMBINATION_CASES), "C402201"),
               (_VERIFICATION,)),
     ),
     "reader-ignores-markers": (

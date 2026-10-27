@@ -4,8 +4,8 @@ SPDX-License-Identifier: Apache-2.0
 -->
 # Failure Keywords
 
-> **Status: design.** Once the code exists, this file is generated from the code's keyword registry,
-> and a unit test fails if code uses a keyword that is missing here (AMB-61).
+> Written by hand. A unit test (200090) fails if the code uses a keyword that is missing here (AMB-61);
+> generating the file from the code was designed but not built (AMB-86).
 
 Every test that does not pass carries one **primary** keyword (the cause) and any number of
 **secondary** keywords (context). Search a report, a log or the CLI by keyword or by prefix:

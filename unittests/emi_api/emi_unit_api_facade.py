@@ -86,14 +86,16 @@ class TestEMIApiInprocess:
         assert len(seen) == 1
 
     def EMI_API_UNIT_300049_match_fields_passed_through(self, tmp_path: Path) -> None:
-        """api.reader waits pass the recipient fields through to the reader (in-process mode)."""
+        """api.reader waits pass the recipient fields and the expected folder (AMB-85) through to the reader
+        (in-process mode)."""
         api, mailboxes, _sender = _inprocess(tmp_path)
         run = api.start_run("400001")
-        api.reader.wait_for_link(run.address(), Cta.ACTIVATE_ACCOUNT, match_fields=("cc",))
-        api.reader.wait_for_emails(run.address(), match_fields=("bcc", "delivered-to"))
+        api.reader.wait_for_link(run.address(), Cta.ACTIVATE_ACCOUNT, match_fields=("cc",), expected_folder="Spam")
+        api.reader.wait_for_emails(run.address(), match_fields=("bcc", "delivered-to"), expected_folder="INBOX")
         api.reader.wait_for_emails(run.address())
-        fields = [wait["match_fields"] for wait in mailboxes.built[0].waits]
-        assert fields == [("cc",), ("bcc", "delivered-to"), None]
+        waits = mailboxes.built[0].waits
+        assert [wait["match_fields"] for wait in waits] == [("cc",), ("bcc", "delivered-to"), None]
+        assert [wait["expected_folder"] for wait in waits] == ["Spam", "INBOX", None]
 
     def EMI_API_UNIT_300062_settle_window_passed_through(self, tmp_path: Path) -> None:
         """api.reader.wait_for_emails passes the settle window through; None keeps the reader's default."""
@@ -240,6 +242,25 @@ class TestEMIApiService:
         assert service.health()["active_runs"] == [_RUN]
         api.close()
         assert service.health()["active_runs"] == []
+
+    def EMI_API_UNIT_300065_delete_run_mail_releases_lease_first(
+            self, served: tuple[BrokerSettings, BrokerService, SimMailboxes], tmp_path: Path) -> None:
+        """Over HTTP the API's own lease is released before the run-scoped purge, which the broker would
+        refuse otherwise; in-process the run's mail, every worker's, is deleted and other mail kept (AMB-79)."""
+        settings, service, _mailboxes = served
+        client = BrokerClient(settings, spawner=lambda _settings: None)
+        api = EmiApi(EmiSettings(broker=settings), run_id=_RUN, backend=client,
+                     greenmail=SimGreenmailReadiness())  # type: ignore[arg-type]
+        api.start_run("400001")
+        assert service.health()["active_runs"] == [_RUN]
+        assert api.delete_run_mail()["run"] == "20261026t153012-a1b2"
+        assert service.health()["active_runs"] == []
+        local, _mailboxes, _sender, purge = make_service(tmp_path)
+        purge.run_ids = {3: "20261026t153012-w07-a1b2", 4: "20261026t153012-w00-ffff"}
+        with EmiApi(EmiSettings(mode=ClientMode.INPROCESS, broker=local.settings), run_id=_RUN,
+                    backend=LocalBroker(local), greenmail=SimGreenmailReadiness()) as inprocess:  # type: ignore[arg-type]
+            assert inprocess.delete_run_mail()["total"] == 1
+        assert purge.deleted == [3]
 
 
 class SimWrapper:

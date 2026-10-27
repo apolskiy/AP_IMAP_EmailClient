@@ -123,10 +123,12 @@ class SimPurge:
     """Read-write IMAP connection over a dictionary of folder -> UIDs."""
 
     def __init__(self, folders: dict[str, list[int]]) -> None:
-        """Hold the simulated folders."""
+        """Hold the simulated folders; ``run_ids`` gives a UID its ``X-EMI-Run-Id`` (none by default)."""
         self.folders = folders
+        self.run_ids: dict[int, str] = {}
         self.selected = ""
         self.criteria: list[str] = []
+        self.header_reads: list[tuple[list[int], str]] = []
         self.deleted: list[int] = []
         self.expunged = 0
         self.closed = False
@@ -144,6 +146,11 @@ class SimPurge:
         """Every UID of the folder."""
         self.criteria.append(criteria)
         return list(self.folders.get(self.selected, []))
+
+    def header_values(self, uids: list[int], name: str) -> dict[int, str]:
+        """The run marker of each UID (``""`` without one)."""
+        self.header_reads.append((list(uids), name))
+        return {uid: self.run_ids.get(uid, "") for uid in uids}
 
     def mark_deleted(self, uids: list[int]) -> None:
         """Record deletions."""

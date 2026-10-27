@@ -6,6 +6,7 @@ import json
 import logging
 import threading
 from collections.abc import Iterator
+from dataclasses import replace
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -13,7 +14,7 @@ import pytest
 
 from emi_greenmail import GreenmailKeyword, GreenmailNotReadyError
 from emi_reader import Cta, EmailWaitError, ImapConnectionError, ImapSettings, ReaderCaseKeyword, ReaderKeyword
-from emi_sender import BatchRequest, InvalidInputError, Marker, Preset, SenderCaseKeyword, SenderSettings
+from emi_sender import BatchRequest, Field, InvalidInputError, Marker, Preset, SenderCaseKeyword, SenderSettings
 from emi_test_broker import (
     BrokerClient,
     BrokerService,
@@ -84,6 +85,9 @@ class TestEMIBrokerWire:
         request = BatchRequest(addresses=(_ADDRESS,) * 5, counts={"activation": 3}, preset=Preset.EVEN_5, seed=4,
                                concurrency=2)
         assert batch_request_from_json(json.loads(json.dumps(batch_request_to_json(request)))) == request
+        combined = replace(request, recipient_field=(Field.TO, Field.BCC))  # AMB-82: sent as "to+bcc"
+        assert batch_request_to_json(combined)["recipient_field"] == "to+bcc"
+        assert batch_request_from_json(json.loads(json.dumps(batch_request_to_json(combined)))) == combined
 
 
 class TestEMIBrokerHttp:
@@ -129,12 +133,14 @@ class TestEMIBrokerHttp:
         assert caught.value.primary == SenderCaseKeyword.CONDITION_INVALID_INPUT
 
     def EMI_TEST_BROKER_UNIT_130079_match_fields_over_http(self, running: tuple[BrokerClient, SimMailboxes]) -> None:
-        """The client sends the recipient fields over HTTP and the reader receives them."""
+        """The client sends the recipient fields and the expected folder (AMB-85) over HTTP and the reader
+        receives them."""
         client, mailboxes = running
-        client.wait_for_emails("qa+C400001_r@example.com", match_fields=("cc",), timeout=5.0)
+        client.wait_for_emails("qa+C400001_r@example.com", match_fields=("cc",), timeout=5.0, expected_folder="Spam")
         client.wait_for_link("qa+C400001_r@example.com", Cta.ACTIVATE_ACCOUNT, timeout=5.0)
-        fields = [wait["match_fields"] for mailbox in mailboxes.built for wait in mailbox.waits]
-        assert fields == [("cc",), None]
+        waits = [wait for mailbox in mailboxes.built for wait in mailbox.waits]
+        assert [wait["match_fields"] for wait in waits] == [("cc",), None]
+        assert [wait["expected_folder"] for wait in waits] == ["Spam", None]
 
     def EMI_TEST_BROKER_UNIT_130080_emails_over_http_keep_bytes(
         self, running: tuple[BrokerClient, SimMailboxes]
@@ -279,19 +285,20 @@ class TestEMIBrokerLogAndCli:
     @pytest.mark.network
     def EMI_TEST_BROKER_UNIT_130073_cli_status_without_broker_exits_3(self, tmp_path: Path) -> None:
         """No broker on the port: exit code 3."""
-        assert main(["--port", str(free_port()), "--log-dir", str(tmp_path), "status"]) == 3
+        assert main(["--test-broker-port", str(free_port()), "--log-dir", str(tmp_path), "status"]) == 3
 
     def EMI_TEST_BROKER_UNIT_130074_cli_bad_age_exits_2(self, tmp_path: Path) -> None:
         """--older-than must be days; checked before any broker is started."""
-        assert main(["--port", str(free_port()), "--log-dir", str(tmp_path), "purge", "--older-than", "1w"]) == 2
+        assert main(["--test-broker-port", str(free_port()), "--log-dir", str(tmp_path),
+                     "purge", "--older-than", "1w"]) == 2
         assert not (tmp_path / START_ERRORS_LOG).exists()
 
     def EMI_TEST_BROKER_UNIT_130076_spawn_command_parses(self, tmp_path: Path) -> None:
         """The auto-start command is accepted by the broker's own parser (options before the subcommand)."""
         settings = BrokerSettings(port=9123, max_connections=4, log_dir=tmp_path, state_dir=tmp_path / "state")
         args = build_parser().parse_args(spawn_command(settings)[3:])
-        assert (args.command, args.port, args.max_connections) == ("serve", 9123, 4)
-        assert (args.log_dir, args.state_dir) == (tmp_path, tmp_path / "state")  # the token file is found
+        assert (args.command, args.test_broker_port, args.max_connections) == ("serve", "9123", "4")
+        assert (Path(args.log_dir), args.state_dir) == (tmp_path, tmp_path / "state")  # the token file is found
         assert args.settings_file == (tmp_path / "state" / "broker_9123_settings.json")
 
     def EMI_TEST_BROKER_UNIT_130077_settings_file_round_trip(self, tmp_path: Path) -> None:

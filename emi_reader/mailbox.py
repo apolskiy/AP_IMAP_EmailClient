@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 Aleksandr Polskiy
 # SPDX-License-Identifier: Apache-2.0
-"""Wait for a test's email in the shared mailbox and return it or its CTA link (design §5.4, §5.5)."""
+"""Wait for a test's email in the shared mailbox and return it or its CTA link (design §5.4, §5.5, §5.9)."""
 
 import logging
 import random
@@ -11,23 +11,30 @@ from typing import Any, NoReturn
 
 from emi_reader.accessibility import FolderAccess, filter_evidence, matrix_rows, probe_account
 from emi_reader.errors import EmailWaitError, ImapConnectionError, LinkExtractionError, MailboxAccessError
-from emi_reader.inventory import CATEGORIES, Inventory, Snapshot, classify
+from emi_reader.inventory import Inventory
 from emi_reader.keywords import ReaderCaseKeyword, ReaderKeyword
 from emi_reader.links import Cta, LinkExtractor
-from emi_reader.mime import ParsedEmail, parse_email
+from emi_reader.matching import (
+    SEARCH_KEYS,
+    Cursor,
+    ReceivedEmail,
+    WaitState,
+    WaitTarget,
+    accept,
+    check_expected_folder,
+    expected_folder_for,
+    match_fields_for,
+    readable_folders,
+    search_address,
+)
+from emi_reader.mime import parse_email
+from emi_reader.poller import SharedPoller
 from emi_reader.settings import ImapSettings
-from emi_reader.transport import FolderStatus, ImaplibTransport, ImapTransport
+from emi_reader.transport import ImaplibTransport, ImapTransport
 
 _LOGGER = logging.getLogger(__name__)
 
-# IMAP SEARCH criteria per recipient field; the client-side check decides the final match.
-_SEARCH_KEYS: dict[str, tuple[str, ...]] = {
-    "to": ("TO",),
-    "cc": ("CC",),
-    "bcc": ("BCC",),
-    "delivered-to": ("HEADER", "Delivered-To"),
-    "x-original-to": ("HEADER", "X-Original-To"),
-}
+__all__ = ["Mailbox", "RawEmail", "ReceivedEmail", "WaitOptions"]
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -58,41 +65,12 @@ class WaitOptions:  # pylint: disable=too-many-instance-attributes
         Raises:
             ValueError: On an invalid value.
         """
-        unknown = [name for name in self.match_fields if name.lower() not in _SEARCH_KEYS]
+        unknown = [name for name in self.match_fields if name.lower() not in SEARCH_KEYS]
         if unknown or not self.match_fields:
-            raise ValueError(f"match_fields must be a non-empty subset of {sorted(_SEARCH_KEYS)}, "
+            raise ValueError(f"match_fields must be a non-empty subset of {sorted(SEARCH_KEYS)}, "
                              f"got {list(self.match_fields)}")
         if min(self.poll_interval, self.poll_jitter, self.settle_window, *self.backoff) < 0:
             raise ValueError("timings must not be negative")
-
-
-@dataclass(frozen=True)
-class ReceivedEmail:
-    """One email that matched a wait.
-
-    Attributes:
-        uid: IMAP UID in its folder.
-        folder: Folder it was found in.
-        email: The decoded email.
-        link: The CTA link, when a CTA was requested.
-        secondary: Secondary keywords from extraction (e.g. no HTML part).
-    """
-
-    uid: int
-    folder: str
-    email: ParsedEmail
-    link: str | None = None
-    secondary: tuple[str, ...] = ()
-
-    @property
-    def message_id(self) -> str:
-        """The ``Message-ID`` header."""
-        return self.email.message_id
-
-    @property
-    def subject(self) -> str:
-        """The decoded subject."""
-        return self.email.subject
 
 
 @dataclass(frozen=True)
@@ -114,74 +92,16 @@ class RawEmail:
     raw: bytes = field(repr=False)
 
 
-@dataclass
-class _Cursor:
-    """Per-folder position: UIDs below ``next_uid`` have been looked at."""
-
-    folder: str
-    uidvalidity: int
-    next_uid: int
-
-
-@dataclass
-class _WaitState:
-    """Everything one wait has found so far."""
-
-    address: str
-    cursors: list[_Cursor] = field(default_factory=list)
-    matches: dict[tuple[str, int], ReceivedEmail] = field(default_factory=dict)
-    access_start: list[FolderAccess] = field(default_factory=list)
-    folders: dict[str, dict[str, int]] = field(default_factory=dict)
-    seen: dict[tuple[str, int], str] = field(default_factory=dict)
-    before: Snapshot | None = None
-
-    def snapshot(self) -> Snapshot:
-        """Folder totals and the categories of every email seen at the address so far (AMB-76)."""
-        counts = dict.fromkeys(CATEGORIES, 0)
-        for category in self.seen.values():
-            counts[category] += 1
-        return Snapshot({name: dict(values) for name, values in self.folders.items()}, counts)
-
-    def record_status(self, folder: str, status: FolderStatus) -> None:
-        """Keep a folder's latest totals from the wait's own ``EXAMINE``."""
-        self.folders[folder] = {"messages": status.messages, "uidnext": status.uidnext}
-
-
-@dataclass(frozen=True)
-class _Target:
-    """What a wait is looking for."""
-
-    address: str
-    cta: Cta | None
-    test_id: str | None
-    run_id: str | None
-    match_fields: tuple[str, ...]
-
-
-def _match_fields(requested: tuple[str, ...] | None, default: tuple[str, ...]) -> tuple[str, ...]:
-    """The recipient fields for one wait: the requested ones (validated) or the mailbox default."""
-    fields = tuple(name.lower() for name in (default if requested is None else requested))
-    unknown = [name for name in fields if name not in _SEARCH_KEYS]
-    if unknown or not fields:
-        raise ValueError(f"match_fields must be a non-empty subset of {sorted(_SEARCH_KEYS)}, got {list(requested)}")
-    return fields
-
-
-def _case_key(test_id: str) -> str:
-    """Compare test IDs in TestRail form: ``400001``, ``c400001`` and ``C400001`` are the same case."""
-    value = test_id.strip().upper()
-    return f"C{value}" if value.isdigit() else value
-
-
-class Mailbox:
-    """Read-only access to the shared mailbox through one IMAP connection.
+class Mailbox:  # pylint: disable=too-many-instance-attributes
+    """Read-only access to the shared mailbox.
 
     The reader never changes flags or deletes mail: folders are opened with ``EXAMINE`` and messages
     fetched with ``BODY.PEEK``. A wait searches immediately (pre-arrived mail) and then fetches only
-    new UIDs on each poll.
+    new UIDs on each poll: on the mailbox's own connection, or through a :class:`SharedPoller` that
+    serves every waiting request of the account (design §5.9).
     """
 
-    def __init__(
+    def __init__(  # pylint: disable=too-many-arguments
         self,
         settings: ImapSettings,
         *,
@@ -190,6 +110,7 @@ class Mailbox:
         clock: Callable[[], float] = time.monotonic,
         sleeper: Callable[[float], None] = time.sleep,
         rng: random.Random | None = None,
+        poller: SharedPoller | None = None,
     ) -> None:
         """Create a mailbox; the connection opens on first use.
 
@@ -200,6 +121,8 @@ class Mailbox:
             clock: Monotonic clock, injectable for tests.
             sleeper: Sleep function, injectable for tests.
             rng: Random source for poll jitter.
+            poller: Serves the waits instead of this mailbox's own loop; ``emails_to`` keeps its own
+                connection.
         """
         self._settings = settings
         self._options = options or WaitOptions()
@@ -207,6 +130,7 @@ class Mailbox:
         self._clock = clock
         self._sleeper = sleeper
         self._rng = rng or random.Random()
+        self._poller = poller
         self._transport: ImapTransport | None = None
         self._extractor = LinkExtractor(mismatch_is_error=self._options.mismatch_is_error)
         self._last_access: list[FolderAccess] = []
@@ -241,7 +165,7 @@ class Mailbox:
         self._transport.open()
         return self._transport
 
-    def wait_for_emails(
+    def wait_for_emails(  # pylint: disable=too-many-arguments
         self,
         address: str,
         *,
@@ -252,6 +176,7 @@ class Mailbox:
         run_id: str | None = None,
         match_fields: tuple[str, ...] | None = None,
         settle_window: float | None = None,
+        expected_folder: str | None = None,
     ) -> list[ReceivedEmail]:
         """Wait until exactly ``count`` matching emails are present.
 
@@ -266,13 +191,17 @@ class Mailbox:
                 ``x-original-to``); the mailbox's ``WaitOptions.match_fields`` by default.
             settle_window: Seconds to keep watching for extra emails once ``count`` arrived; the mailbox's
                 ``WaitOptions.settle_window`` by default. 0 suits mail that was fully delivered before the wait.
+            expected_folder: A configured folder the test needs (e.g. ``Spam``); the wait ends at once when
+                it cannot be read (AMB-85).
 
         Returns:
             The matching emails, oldest first.
 
         Raises:
+            ValueError: An invalid count, settle window, match field or expected folder.
             EmailWaitError: ``CASE_EMAIL_NOT_RECEIVED`` or ``CASE_EMAIL_COUNT_EXCEEDED``.
-            MailboxAccessError: No readable folder, or evidence of filtering (environment).
+            MailboxAccessError: No readable folder, the expected folder unreadable, or evidence of filtering
+                (environment).
             ImapConnectionError: A network fault that retries did not cure, or a fatal one.
             LinkExtractionError: A matching email's link is ambiguous or inconsistent.
         """
@@ -281,8 +210,9 @@ class Mailbox:
         settle = self._options.settle_window if settle_window is None else float(settle_window)
         if settle < 0:
             raise ValueError(f"settle_window must not be negative, got {settle}")
-        target = _Target(address.strip().lower(), cta, test_id, run_id,
-                         _match_fields(match_fields, self._options.match_fields))
+        target = WaitTarget(address.strip().lower(), cta, test_id, run_id,
+                            match_fields_for(match_fields, self._options.match_fields),
+                            expected_folder_for(expected_folder, self._settings))
         found = self._wait(target, timeout, lambda matches: len(matches) >= count, settle=settle)
         if len(found) > count:
             raise EmailWaitError(
@@ -302,6 +232,7 @@ class Mailbox:
         test_id: str | None = None,
         run_id: str | None = None,
         match_fields: tuple[str, ...] | None = None,
+        expected_folder: str | None = None,
     ) -> str:
         """Wait for an email with the given button and return its link (newest if several).
 
@@ -312,12 +243,14 @@ class Mailbox:
             test_id: Required ``X-EMI-Test-Id`` marker (sender-generated mail).
             run_id: Required ``X-EMI-Run-Id`` marker.
             match_fields: Recipient fields for this wait; the mailbox default when None.
+            expected_folder: A configured folder the test needs; unreadable ends the wait at once (AMB-85).
 
         Returns:
             The CTA link.
         """
-        target = _Target(address.strip().lower(), cta, test_id, run_id,
-                         _match_fields(match_fields, self._options.match_fields))
+        target = WaitTarget(address.strip().lower(), cta, test_id, run_id,
+                            match_fields_for(match_fields, self._options.match_fields),
+                            expected_folder_for(expected_folder, self._settings))
         found = self._wait(target, timeout, lambda matches: len(matches) >= 1, settle=0.0)
         if len(found) > 1:
             _LOGGER.warning("%s: %d emails for %s; using the newest",
@@ -361,28 +294,31 @@ class Mailbox:
             transport.examine(entry.folder)
             seen: set[int] = set()
             for address in addresses:
-                target = _Target(address, None, None, None, tuple(_SEARCH_KEYS))
-                uids = [uid for uid in self._search_address(transport, target) if uid not in seen]
+                target = WaitTarget(address, None, None, None, tuple(SEARCH_KEYS))
+                uids = [uid for uid in search_address(transport, target) if uid not in seen]
                 seen.update(uids)
                 found.extend((entry.folder, uid, address) for uid in uids)
         return found
 
+    # --- waiting ---------------------------------------------------------------------------------------
+
     def _wait(
         self,
-        target: _Target,
+        target: WaitTarget,
         timeout: float,
         satisfied: Callable[[list[ReceivedEmail]], bool],
         *,
         settle: float,
     ) -> list[ReceivedEmail]:
         """Poll until ``satisfied`` (plus ``settle`` seconds), the deadline, or a fatal error."""
-        deadline = self._clock() + timeout
-        settle_until: float | None = None
-        state: _WaitState | None = None
-        last_error: ImapConnectionError | None = None
-        had_session = False  # a working connection during this wait (AMB-78)
         self._attempts = []
         self._inventory = None
+        rule = _Rule(self._clock() + timeout, satisfied, settle)
+        if self._poller is not None:
+            return self._wait_shared(self._poller, target, rule)
+        state: WaitState | None = None
+        last_error: ImapConnectionError | None = None
+        had_session = False  # a working connection during this wait (AMB-78)
         while True:
             try:
                 state = self._start(target) if state is None else state
@@ -393,22 +329,51 @@ class Mailbox:
                     raise
                 had_session = had_session or error.retryable  # only a live session can drop or time out
                 last_error = self._record_retry(error)
-            if state is not None and state.before is not None:
-                self._inventory = Inventory(target.address, target.match_fields, state.before,
-                                            state.snapshot()).to_json()
-            found = sorted(state.matches.values(), key=lambda item: (item.folder, item.uid)) if state else []
-            now = self._clock()
-            if satisfied(found):
-                if settle <= 0:
+            found = self._decide(target, state, last_error, rule)
+            if found is not None:
+                return found
+            remaining = max(rule.deadline - self._clock(), 0.0)
+            self._sleeper(min(self._next_delay(last_error), remaining))
+
+    def _wait_shared(self, poller: SharedPoller, target: WaitTarget, rule: "_Rule") -> list[ReceivedEmail]:
+        """Let the shared poller look; decide after each of its cycles by this wait's own rules (§5.9)."""
+        request = poller.register(target, self._extractor)
+        try:
+            while True:
+                poller.next_cycle(request, max(rule.deadline - self._clock(), 0.0))
+                self._attempts = list(request.attempts)
+                self._last_access = request.access or self._last_access
+                found = self._decide(target, request.state, request.last_error, rule)
+                if found is not None:
                     return found
-                settle_until = settle_until if settle_until is not None else now + settle
-                if now >= settle_until:
-                    return found
-            if now >= deadline:
-                if satisfied(found):
-                    return found  # the deadline cut the settle window short
-                self._give_up(target, state, last_error, found)
-            self._sleeper(min(self._next_delay(last_error), max(deadline - now, 0.0)))
+        finally:
+            poller.unregister(request)
+
+    def _decide(self, target: WaitTarget, state: WaitState | None, last_error: ImapConnectionError | None,
+                rule: "_Rule") -> list[ReceivedEmail] | None:
+        """The matches when the wait is done (count reached and settled), None to look again.
+
+        Raises:
+            ImapConnectionError: At the deadline, when the last look failed on the network.
+            MailboxAccessError: At the deadline, when mail may have been filtered away.
+            EmailWaitError: At the deadline, when too few emails matched.
+        """
+        if state is not None and state.before is not None:
+            self._inventory = Inventory(target.address, target.match_fields, state.before,
+                                        state.snapshot()).to_json()
+        found = sorted(state.matches.values(), key=lambda item: (item.folder, item.uid)) if state else []
+        now = self._clock()
+        if rule.satisfied(found):
+            if rule.settle <= 0:
+                return found
+            rule.settle_until = rule.settle_until if rule.settle_until is not None else now + rule.settle
+            if now >= rule.settle_until:
+                return found
+        if now >= rule.deadline:
+            if rule.satisfied(found):
+                return found  # the deadline cut the settle window short
+            self._give_up(target, state, last_error, found)
+        return None
 
     @staticmethod
     def _restarting(error: ImapConnectionError, had_session: bool) -> bool:
@@ -432,8 +397,8 @@ class Mailbox:
 
     def _give_up(
         self,
-        target: _Target,
-        state: _WaitState | None,
+        target: WaitTarget,
+        state: WaitState | None,
         last_error: ImapConnectionError | None,
         found: list[ReceivedEmail],
     ) -> NoReturn:
@@ -458,9 +423,12 @@ class Mailbox:
                      "found": len(found), "folders": self.access_matrix, "inventory": self._inventory},
         )
 
-    def _raise_if_filtered(self, state: _WaitState) -> None:
+    def _raise_if_filtered(self, state: WaitState) -> None:
         """Re-probe folders; raise an environment failure if mail may be filtered away."""
-        after = probe_account(self._connection(), self._settings.username, self._settings.folders)
+        if self._poller is not None:
+            after = self._poller.probe()
+        else:
+            after = probe_account(self._connection(), self._settings.username, self._settings.folders)
         self._last_access = after
         signals = filter_evidence(state.access_start, after, self._options.filter_risk_folders)
         if signals:
@@ -471,47 +439,24 @@ class Mailbox:
                 details={"signals": signals, "folders": self.access_matrix},
             )
 
-    def _start(self, target: _Target) -> _WaitState:
+    def _start(self, target: WaitTarget) -> WaitState:
         """Probe folders and search for mail that arrived before the wait started."""
         transport = self._connection()
         access = probe_account(transport, self._settings.username, self._settings.folders,
                                raise_retryable=True)
         self._last_access = access
-        readable = [entry for entry in access if entry.accessible]
-        if not readable:
-            causes = tuple(dict.fromkeys(entry.detail for entry in access
-                                         if entry.detail.startswith("READER_")))
-            raise MailboxAccessError(
-                f"none of the folders {list(self._settings.folders)} can be read",
-                ReaderKeyword.MAILBOX_NONE_ACCESSIBLE,
-                secondary=causes,
-                infrastructure=True,
-                details={"folders": self.access_matrix, "endpoint": self._settings.endpoint},
-            )
-        state = _WaitState(address=target.address, access_start=access)
-        for entry in readable:
+        check_expected_folder(access, target, self._settings)
+        state = WaitState(address=target.address, access_start=access)
+        for entry in readable_folders(access, self._settings):
             status = transport.examine(entry.folder)
             state.record_status(entry.folder, status)
-            cursor = _Cursor(entry.folder, status.uidvalidity, status.uidnext)
+            cursor = Cursor(entry.folder, status.uidvalidity, status.uidnext)
             state.cursors.append(cursor)
-            self._consider(state, target, cursor.folder, self._search_address(transport, target))
+            self._consider(state, target, cursor.folder, search_address(transport, target))
         state.before = state.snapshot()
         return state
 
-    def _search_address(self, transport: ImapTransport, target: _Target, since_uid: int = 0) -> list[int]:
-        """Server-side search per selected field, from ``since_uid`` on; only narrows candidates.
-
-        A search costs about the same however full the folder is, while each fetch does not (AMB-71),
-        so polls search for the address among new UIDs instead of fetching every new message.
-        """
-        uid_range = ("UID", f"{since_uid}:*") if since_uid else ()
-        uids: set[int] = set()
-        for name in target.match_fields:
-            uids.update(transport.uid_search((*uid_range, *_SEARCH_KEYS[name], f'"{target.address}"')))
-        # "n:*" also matches the highest UID when n is above it (RFC 3501), so drop anything older.
-        return sorted(uid for uid in uids if uid >= since_uid)
-
-    def _poll(self, state: _WaitState, target: _Target) -> None:
+    def _poll(self, state: WaitState, target: WaitTarget) -> None:
         """Fetch and check UIDs that arrived since the last look, in every readable folder."""
         transport = self._connection()
         for cursor in state.cursors:
@@ -520,49 +465,30 @@ class Mailbox:
             if status.uidvalidity != cursor.uidvalidity:
                 _LOGGER.info("%s: %s %d -> %d; searching again", ReaderKeyword.IMAP_UIDVALIDITY_CHANGED,
                              cursor.folder, cursor.uidvalidity, status.uidvalidity)
-                state.matches = {
-                    key: value for key, value in state.matches.items() if key[0] != cursor.folder
-                }
+                state.forget_folder(cursor.folder)
                 cursor.uidvalidity, cursor.next_uid = status.uidvalidity, status.uidnext
-                self._consider(state, target, cursor.folder, self._search_address(transport, target))
+                self._consider(state, target, cursor.folder, search_address(transport, target))
                 continue
             if status.uidnext <= cursor.next_uid:
                 continue
-            new_uids = self._search_address(transport, target, cursor.next_uid)
+            new_uids = search_address(transport, target, cursor.next_uid)
             cursor.next_uid = status.uidnext
             self._consider(state, target, cursor.folder, new_uids)
 
-    def _consider(self, state: _WaitState, target: _Target, folder: str, uids: list[int]) -> None:
+    def _consider(self, state: WaitState, target: WaitTarget, folder: str, uids: list[int]) -> None:
         """Fetch the candidate UIDs whole, in one command, and record those matching address, marker and CTA."""
         candidates = [uid for uid in uids if (folder, uid) not in state.matches]
         if not candidates:
             return
         for uid, raw in sorted(self._connection().fetch_messages(candidates).items()):
-            email = parse_email(raw)
-            state.seen[(folder, uid)] = classify(email)  # the inventory, from what the wait fetches anyway
-            if not self._header_match(email, target):
-                continue
-            match = self._full_match(email, uid, folder, target)
-            if match is not None:
-                state.matches[(folder, uid)] = match
+            accept(state, target, self._extractor, (folder, uid), parse_email(raw))
 
-    def _header_match(self, headers: ParsedEmail, target: _Target) -> bool:
-        """Exact, case-insensitive recipient match on the selected fields, plus the markers."""
-        if target.address not in headers.addresses_in(target.match_fields):
-            return False
-        if target.test_id is not None and _case_key(headers.test_id) != _case_key(target.test_id):
-            return False
-        return target.run_id is None or headers.run_id == target.run_id
 
-    def _full_match(self, email: ParsedEmail, uid: int, folder: str, target: _Target) -> ReceivedEmail | None:
-        """Check a whole message contains the requested CTA."""
-        if target.cta is None:
-            return ReceivedEmail(uid=uid, folder=folder, email=email)
-        try:
-            result = self._extractor.extract(email, target.cta)
-        except LinkExtractionError as error:
-            if error.primary == ReaderCaseKeyword.LINK_NOT_FOUND:
-                return None  # another kind of email to the same address: not a match, not an error
-            raise
-        return ReceivedEmail(uid=uid, folder=folder, email=email, link=result.url,
-                             secondary=result.secondary)
+@dataclass
+class _Rule:
+    """When a wait is done: its deadline, its count test and its settle window."""
+
+    deadline: float
+    satisfied: Callable[[list[ReceivedEmail]], bool]
+    settle: float
+    settle_until: float | None = None

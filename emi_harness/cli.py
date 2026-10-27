@@ -35,7 +35,7 @@ from emi_api import RunId
 from emi_harness.gate import missing_results
 from emi_harness.jobs import read_stop
 from emi_harness.keywords import JobKeyword
-from emi_harness.options import add_arguments, cli_values, pass_through, read_dotenv, resolve
+from emi_harness.options import add_arguments, cli_values, api_settings, pass_through, read_dotenv, resolve
 from emi_harness.priorities import LOW_GATE, Job, job_name
 from emi_harness.results import job_dir, load_results
 from emi_harness.summary import job_counts, report_job
@@ -112,7 +112,7 @@ def main(argv: Sequence[str] | None = None, runner: PytestRunner = pytest.main) 
     args = build_parser().parse_args(argv)
     try:
         resolved = resolve(cli_values(args), os.environ, read_dotenv())
-        resolved.emi_settings()
+        api_settings(resolved)
     except ValueError as error:
         print(f"invalid option: {error}", file=sys.stderr)
         return EXIT_USAGE

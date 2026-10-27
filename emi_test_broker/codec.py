@@ -13,6 +13,7 @@ from typing import Any, TypeVar
 from emi_greenmail.errors import GreenmailError
 from emi_reader import Cta, ParsedEmail, RawEmail, ReaderError, ReceivedEmail
 from emi_sender import BatchRequest, Field, Manifest, ManifestEntry, Marker, Order, Preset, SenderError
+from emi_sender.compose import fields_label, parse_fields
 from emi_test_broker.errors import RemoteError, TestBrokerError
 
 _BASE = TypeVar("_BASE", bound=Exception)
@@ -212,7 +213,7 @@ def batch_request_to_json(request: BatchRequest) -> dict[str, Any]:
     """
     return {"addresses": list(request.addresses), "counts": dict(request.counts), "preset": str(request.preset),
             "explicit": {key: dict(value) for key, value in request.explicit.items()} if request.explicit else None,
-            "order": str(request.order), "seed": request.seed, "recipient_field": str(request.recipient_field),
+            "order": str(request.order), "seed": request.seed, "recipient_field": fields_label(request.recipient_field),
             "concurrency": request.concurrency, "jitter_ms": request.jitter_ms}
 
 
@@ -231,7 +232,7 @@ def batch_request_from_json(data: dict[str, Any]) -> BatchRequest:
     return BatchRequest(addresses=tuple(data.get("addresses", ())), counts=dict(data.get("counts", {})),
                         preset=Preset(data.get("preset", Preset.ALL_TO_ONE)), explicit=data.get("explicit"),
                         order=Order(data.get("order", Order.FIXED)), seed=data.get("seed"),
-                        recipient_field=Field(data.get("recipient_field", Field.TO)),
+                        recipient_field=parse_fields(data.get("recipient_field", Field.TO)),
                         concurrency=data.get("concurrency", 1), jitter_ms=data.get("jitter_ms", 0))
 
 

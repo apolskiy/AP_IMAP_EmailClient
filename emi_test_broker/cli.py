@@ -2,8 +2,12 @@
 # SPDX-License-Identifier: Apache-2.0
 """Command line: ``python -m emi_test_broker start|serve|stop|status|purge`` (design §7).
 
-Exit codes: 0 done, 1 purge refused (runs active), 2 invalid input, 3 broker unavailable (not answering,
-port taken, other version on the port).
+The settings flags are generated from the broker's option table (``emi_test_broker.settings.OPTIONS``:
+the reader's and sender's rows plus the broker's own, AMB-81). Precedence: CLI option > real environment
+variable > ``.env`` > built-in default; passwords come only from the environment or ``.env``.
+
+Exit codes: 0 done, 1 purge refused (runs active; with ``--run-id``, that run), 2 invalid input, 3 broker
+unavailable (not answering, port taken, other version on the port).
 """
 
 import argparse
@@ -15,16 +19,16 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from dotenv import load_dotenv
-
+from emi_config import add_arguments, from_command_line, read_dotenv
 from emi_reader import ReaderError
 from emi_test_broker.broker_log import LOGGER_NAME, configure
 from emi_test_broker.client import BrokerClient, identity_problem
 from emi_test_broker.errors import BrokerUnavailableError, PurgeRefusedError
 from emi_test_broker.keywords import TestBrokerKeyword
+from emi_test_broker.purge import PurgeRequest, run_of
 from emi_test_broker.server import bind, serve
 from emi_test_broker.service import BrokerService
-from emi_test_broker.settings import BrokerSettings, settings_from_env, settings_from_json
+from emi_test_broker.settings import OPTIONS, BrokerSettings, broker_settings_from, settings_from_json
 
 EXIT_OK = 0
 EXIT_REFUSED = 1
@@ -40,9 +44,7 @@ def build_parser() -> argparse.ArgumentParser:
         The parser.
     """
     parser = argparse.ArgumentParser(prog="python -m emi_test_broker", description="EMI shared test broker")
-    parser.add_argument("--port", type=int, help="broker port (env EMI_TEST_BROKER_PORT, default 8025)")
-    parser.add_argument("--max-connections", type=int, help="connection budget (env EMI_MAX_CONNECTIONS)")
-    parser.add_argument("--log-dir", type=Path, help="log directory (default logs)")
+    add_arguments(parser.add_argument_group("settings (also EMI_* variables or .env)").add_argument, OPTIONS)
     parser.add_argument("--state-dir", type=Path, help="directory of the broker's state file (default: temp)")
     parser.add_argument("--settings-file", type=Path,
                         help="settings written by an auto-start (passwords from the environment)")
@@ -55,6 +57,7 @@ def build_parser() -> argparse.ArgumentParser:
     purge.add_argument("--dry-run", action="store_true", help="count only")
     purge.add_argument("--older-than", help="only mail older than N days, e.g. 7d")
     purge.add_argument("--all", action="store_true", dest="everything", help="every email, not only EMI mail")
+    purge.add_argument("--run-id", help="only this run's mail, every worker's (other runs may be active)")
     return parser
 
 
@@ -97,9 +100,12 @@ def _serve(settings: BrokerSettings) -> int:
 def _purge(client: BrokerClient, args: argparse.Namespace) -> int:
     """Run a purge through the broker so the active-run check applies."""
     older_than_days = _older_than_days(args.older_than)  # invalid input fails before any broker is started
+    if args.run_id:
+        PurgeRequest(older_than_days=older_than_days, everything=args.everything, run=run_of(args.run_id))
     client.ensure_running()
     try:
-        report = client.purge(dry_run=args.dry_run, older_than_days=older_than_days, everything=args.everything)
+        report = client.purge(dry_run=args.dry_run, older_than_days=older_than_days, everything=args.everything,
+                              run_id=args.run_id)
     except PurgeRefusedError as error:
         print(f"{error.primary}: {error}", file=sys.stderr)
         return EXIT_REFUSED
@@ -117,14 +123,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         The exit code.
     """
     logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    load_dotenv(override=False)  # real environment variables win over .env
     args = build_parser().parse_args(argv)
     try:
         if args.settings_file:
-            settings = settings_from_json(json.loads(args.settings_file.read_text(encoding="utf-8")), os.environ)
+            # Passwords: the environment the starter passed, else .env; a real variable wins.
+            known = {key: value for key, value in read_dotenv().items() if value is not None}
+            settings = settings_from_json(json.loads(args.settings_file.read_text(encoding="utf-8")),
+                                          {**known, **os.environ})
         else:
-            settings = settings_from_env(os.environ, port=args.port, max_connections=args.max_connections,
-                                         log_dir=args.log_dir, state_dir=args.state_dir)
+            settings = broker_settings_from(from_command_line(args, OPTIONS, os.environ), state_dir=args.state_dir)
         client = BrokerClient(settings)
         if args.command == "serve":
             return _serve(settings)

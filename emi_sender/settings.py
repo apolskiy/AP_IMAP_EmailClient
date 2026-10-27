@@ -1,10 +1,12 @@
 # SPDX-FileCopyrightText: 2026 Aleksandr Polskiy
 # SPDX-License-Identifier: Apache-2.0
-"""Delivery settings for the sender (design §3, §6.4)."""
+"""Delivery settings for the sender and its option rows (design §3, §6.4, AMB-81)."""
 
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
+
+from emi_config import SECURITY_CHOICES, Option, Resolved
 
 _REDACTED = "***"
 # Public password of the local Greenmail test user; any other password comes from the environment.
@@ -111,3 +113,54 @@ class SenderSettings:  # pylint: disable=too-many-instance-attributes
             "connect_timeout": self.connect_timeout, "read_timeout": self.read_timeout,
             "verify_tls": self.verify_tls,
         }
+
+
+# imap_port, imap_password and the timeouts are the reader's rows too and must stay identical to them
+# (merge() checks it); the sender declares them itself so that it never imports the reader.
+OPTIONS: tuple[Option, ...] = (
+    Option(name="smtp_host", env="EMI_SMTP_HOST", kind="str", default="127.0.0.1",
+           help="mail server host the sender delivers to (SMTP and APPEND)"),
+    Option(name="smtp_port", env="EMI_SMTP_PORT", kind="int", default=None, minimum=1, maximum=65535,
+           help="SMTP port (default per security: 3025 plain, 3465 ssl)"),
+    Option(name="smtp_security", env="EMI_SMTP_SECURITY", kind="choice", default="plain",
+           choices=SECURITY_CHOICES, help="SMTP / APPEND connection security"),
+    Option(name="smtp_user", env="EMI_SMTP_USER", kind="str", default="qa", help="SMTP / APPEND login"),
+    Option(name="smtp_password", env="EMI_SMTP_PASSWORD", kind="str", default=GREENMAIL_TEST_PASSWORD,
+           secret=True, help="SMTP password (env or .env only); setting it turns SMTP login on"),
+    Option(name="sender_transport", env="EMI_SENDER_TRANSPORT", kind="choice", default="smtp",
+           choices=("smtp", "append"), help="how the sender delivers: SMTP or IMAP APPEND"),
+    Option(name="base_mailbox", env="EMI_BASE_MAILBOX", kind="str", default="qa@example.com",
+           help="the shared mailbox every test address is built on"),
+    Option(name="imap_port", env="EMI_IMAP_PORT", kind="int", default=None, minimum=1, maximum=65535,
+           help="IMAP port (default per security: 3143 plain, 3993 ssl)"),
+    Option(name="imap_password", env="EMI_IMAP_PASSWORD", kind="str", default=GREENMAIL_TEST_PASSWORD,
+           secret=True, help="IMAP password (env or .env only)"),
+    Option(name="connect_timeout", env="EMI_CONNECT_TIMEOUT", kind="float", default=10.0, minimum=1.0,
+           maximum=3600.0, help="seconds to open an IMAP/SMTP connection"),
+    Option(name="read_timeout", env="EMI_READ_TIMEOUT", kind="float", default=15.0, minimum=1.0,
+           maximum=3600.0, help="seconds for one IMAP/SMTP reply"),
+)
+
+
+def sender_settings_from(resolved: Resolved) -> SenderSettings:
+    """The sender settings a resolved table describes.
+
+    ``APPEND`` logs in with the IMAP password, SMTP with the SMTP password; SMTP login is on only when
+    the SMTP password was set.
+
+    Args:
+        resolved: Values of a table that includes :data:`OPTIONS`.
+
+    Returns:
+        The settings.
+
+    Raises:
+        ValueError: If a value is out of range.
+    """
+    transport = Transport(resolved["sender_transport"])
+    password = resolved["imap_password"] if transport is Transport.APPEND else resolved["smtp_password"]
+    return SenderSettings(transport=transport, host=resolved["smtp_host"], smtp_port=resolved["smtp_port"],
+                          imap_port=resolved["imap_port"], security=Security(resolved["smtp_security"]),
+                          username=resolved["smtp_user"], password=password,
+                          smtp_login=resolved.given("smtp_password"), base_mailbox=resolved["base_mailbox"],
+                          connect_timeout=resolved["connect_timeout"], read_timeout=resolved["read_timeout"])

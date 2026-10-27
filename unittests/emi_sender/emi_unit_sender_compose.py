@@ -8,7 +8,7 @@ from email.parser import BytesParser
 
 import pytest
 
-from emi_sender import Field, InvalidInputError, Kind, Marker, builtin_templates, compose
+from emi_sender import Field, InvalidInputError, Kind, Marker, builtin_templates, compose, fields_label, parse_fields
 from emi_sender.delivery import serialize
 from emi_sender.tokens import find_token, token_claims, verify
 
@@ -95,6 +95,22 @@ class TestEMISenderCompose:
         assert message["Cc"] == cc_header
         assert message["Bcc"] is None
         assert message["Delivered-To"] == delivered_to
+
+    def EMI_SENDER_UNIT_110072_recipient_field_combinations(self) -> None:
+        """One email carries the address in several fields (AMB-82): To and Cc together, or Cc and Bcc with
+        To undisclosed; the forms ``to,cc``, ``cc+to`` and a list all mean the same; unknown or empty fields
+        are invalid input; the manifest names the combination ``to+cc``."""
+        template = builtin_templates()[Kind.ACTIVATION]
+        both = compose(template, _ADDRESS, field=(Field.TO, Field.CC), sent_at=_SENT_AT).message
+        assert _ADDRESS in str(both["To"]) and both["Cc"] == _ADDRESS and both["Delivered-To"] is None
+        hidden = compose(template, _ADDRESS, field=(Field.BCC, Field.CC), sent_at=_SENT_AT).message
+        assert "undisclosed" in str(hidden["To"]) and hidden["Cc"] == _ADDRESS
+        assert hidden["Delivered-To"] == _ADDRESS and hidden["Bcc"] is None
+        assert parse_fields("to,cc") == parse_fields("cc+to") == parse_fields(["cc", "to"]) == (Field.TO, Field.CC)
+        assert parse_fields("bcc") is Field.BCC and fields_label((Field.CC, Field.TO)) == "to+cc"
+        for bad in ("to,fax", "", []):
+            with pytest.raises(InvalidInputError):
+                parse_fields(bad)
 
     def EMI_SENDER_UNIT_110007_generic_has_no_links(self) -> None:
         """Generic mail is built from scratch and contains no link."""

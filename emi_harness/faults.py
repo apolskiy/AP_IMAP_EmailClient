@@ -72,7 +72,7 @@ class FaultyBackend:
 
     def wait_for_link(  # pylint: disable=too-many-arguments
         self, address: str, cta: Cta, *, timeout: float = 60.0, test_id: str | None = None,
-        run_id: str | None = None, match_fields: tuple[str, ...] | None = None,
+        run_id: str | None = None, match_fields: tuple[str, ...] | None = None, expected_folder: str | None = None,
     ) -> str:
         """Wait for an email with the given button and return its link.
 
@@ -83,17 +83,18 @@ class FaultyBackend:
             test_id: Required test marker.
             run_id: Required run marker.
             match_fields: Recipient fields the address must appear in.
+            expected_folder: A folder the wait needs to read.
 
         Returns:
             The CTA link.
         """
         return self._inner.wait_for_link(address, cta, timeout=timeout, test_id=test_id, run_id=run_id,
-                                         match_fields=match_fields)
+                                         match_fields=match_fields, expected_folder=expected_folder)
 
     def wait_for_emails(  # pylint: disable=too-many-arguments
         self, address: str, *, cta: Cta | None = None, count: int = 1, timeout: float = 60.0,
         test_id: str | None = None, run_id: str | None = None, match_fields: tuple[str, ...] | None = None,
-        settle_window: float | None = None,
+        settle_window: float | None = None, expected_folder: str | None = None,
     ) -> list[ReceivedEmail]:
         """Wait until exactly ``count`` matching emails are present.
 
@@ -106,12 +107,14 @@ class FaultyBackend:
             run_id: Required run marker.
             match_fields: Recipient fields the address must appear in.
             settle_window: Seconds to watch for extra emails.
+            expected_folder: A folder the wait needs to read.
 
         Returns:
             The emails, oldest first.
         """
         return self._inner.wait_for_emails(address, cta=cta, count=count, timeout=timeout, test_id=test_id,
-                                           run_id=run_id, match_fields=match_fields, settle_window=settle_window)
+                                           run_id=run_id, match_fields=match_fields, settle_window=settle_window,
+                                           expected_folder=expected_folder)
 
 
 class SenderDropsEmail(FaultyBackend):
@@ -181,7 +184,7 @@ class ReaderAnyField(FaultyBackend):
     def wait_for_emails(  # pylint: disable=too-many-arguments
         self, address: str, *, cta: Cta | None = None, count: int = 1, timeout: float = 60.0,
         test_id: str | None = None, run_id: str | None = None, match_fields: tuple[str, ...] | None = None,
-        settle_window: float | None = None,
+        settle_window: float | None = None, expected_folder: str | None = None,
     ) -> list[ReceivedEmail]:
         """Wait with every recipient field.
 
@@ -194,12 +197,14 @@ class ReaderAnyField(FaultyBackend):
             run_id: Required run marker.
             match_fields: Ignored.
             settle_window: Seconds to watch for extra emails.
+            expected_folder: A folder the wait needs to read.
 
         Returns:
             The emails, oldest first.
         """
         return self.inner.wait_for_emails(address, cta=cta, count=count, timeout=timeout, test_id=test_id,
-                                          run_id=run_id, match_fields=_ALL_FIELDS, settle_window=settle_window)
+                                          run_id=run_id, match_fields=_ALL_FIELDS, settle_window=settle_window,
+                                          expected_folder=expected_folder)
 
 
 class ReaderIgnoresMarkers(FaultyBackend):
@@ -208,7 +213,7 @@ class ReaderIgnoresMarkers(FaultyBackend):
     def wait_for_emails(  # pylint: disable=too-many-arguments
         self, address: str, *, cta: Cta | None = None, count: int = 1, timeout: float = 60.0,
         test_id: str | None = None, run_id: str | None = None, match_fields: tuple[str, ...] | None = None,
-        settle_window: float | None = None,
+        settle_window: float | None = None, expected_folder: str | None = None,
     ) -> list[ReceivedEmail]:
         """Wait without markers.
 
@@ -221,12 +226,14 @@ class ReaderIgnoresMarkers(FaultyBackend):
             run_id: Ignored.
             match_fields: Recipient fields the address must appear in.
             settle_window: Seconds to watch for extra emails.
+            expected_folder: A folder the wait needs to read.
 
         Returns:
             The emails, oldest first.
         """
         return self.inner.wait_for_emails(address, cta=cta, count=count, timeout=timeout, test_id=None, run_id=None,
-                                          match_fields=match_fields, settle_window=settle_window)
+                                          match_fields=match_fields, settle_window=settle_window,
+                                          expected_folder=expected_folder)
 
 
 class ReaderSlotCollapse(FaultyBackend):
@@ -235,7 +242,7 @@ class ReaderSlotCollapse(FaultyBackend):
     def wait_for_emails(  # pylint: disable=too-many-arguments
         self, address: str, *, cta: Cta | None = None, count: int = 1, timeout: float = 60.0,
         test_id: str | None = None, run_id: str | None = None, match_fields: tuple[str, ...] | None = None,
-        settle_window: float | None = None,
+        settle_window: float | None = None, expected_folder: str | None = None,
     ) -> list[ReceivedEmail]:
         """Wait on the address with its slot removed.
 
@@ -248,13 +255,14 @@ class ReaderSlotCollapse(FaultyBackend):
             run_id: Required run marker.
             match_fields: Recipient fields the address must appear in.
             settle_window: Seconds to watch for extra emails.
+            expected_folder: A folder the wait needs to read.
 
         Returns:
             The emails, oldest first.
         """
         return self.inner.wait_for_emails(_SLOT.sub("@", address), cta=cta, count=count, timeout=timeout,
                                           test_id=test_id, run_id=run_id, match_fields=match_fields,
-                                          settle_window=settle_window)
+                                          settle_window=settle_window, expected_folder=expected_folder)
 
 
 class _ResultFault(FaultyBackend):
@@ -263,7 +271,7 @@ class _ResultFault(FaultyBackend):
     def wait_for_emails(  # pylint: disable=too-many-arguments
         self, address: str, *, cta: Cta | None = None, count: int = 1, timeout: float = 60.0,
         test_id: str | None = None, run_id: str | None = None, match_fields: tuple[str, ...] | None = None,
-        settle_window: float | None = None,
+        settle_window: float | None = None, expected_folder: str | None = None,
     ) -> list[ReceivedEmail]:
         """The real wait, then :meth:`_change`.
 
@@ -276,13 +284,15 @@ class _ResultFault(FaultyBackend):
             run_id: Required run marker.
             match_fields: Recipient fields the address must appear in.
             settle_window: Seconds to watch for extra emails.
+            expected_folder: A folder the wait needs to read.
 
         Returns:
             The changed emails.
         """
         return self._change(self.inner.wait_for_emails(address, cta=cta, count=count, timeout=timeout,
                                                        test_id=test_id, run_id=run_id, match_fields=match_fields,
-                                                       settle_window=settle_window))
+                                                       settle_window=settle_window,
+                                                       expected_folder=expected_folder))
 
     def _change(self, emails: list[ReceivedEmail]) -> list[ReceivedEmail]:
         """The fault's change; none by default."""
@@ -310,7 +320,7 @@ class ReaderWrongLink(_ResultFault):
 
     def wait_for_link(  # pylint: disable=too-many-arguments
         self, address: str, cta: Cta, *, timeout: float = 60.0, test_id: str | None = None,
-        run_id: str | None = None, match_fields: tuple[str, ...] | None = None,
+        run_id: str | None = None, match_fields: tuple[str, ...] | None = None, expected_folder: str | None = None,
     ) -> str:
         """The real link, changed.
 
@@ -321,12 +331,13 @@ class ReaderWrongLink(_ResultFault):
             test_id: Required test marker.
             run_id: Required run marker.
             match_fields: Recipient fields the address must appear in.
+            expected_folder: A folder the wait needs to read.
 
         Returns:
             A wrong link.
         """
         return _wrong(self.inner.wait_for_link(address, cta, timeout=timeout, test_id=test_id, run_id=run_id,
-                                               match_fields=match_fields))
+                                               match_fields=match_fields, expected_folder=expected_folder))
 
     def _change(self, emails: list[ReceivedEmail]) -> list[ReceivedEmail]:
         """Every link changed."""
@@ -338,7 +349,7 @@ class ReaderGivesUpEarly(FaultyBackend):
 
     def wait_for_link(  # pylint: disable=too-many-arguments
         self, address: str, cta: Cta, *, timeout: float = 60.0, test_id: str | None = None,
-        run_id: str | None = None, match_fields: tuple[str, ...] | None = None,
+        run_id: str | None = None, match_fields: tuple[str, ...] | None = None, expected_folder: str | None = None,
     ) -> str:
         """Wait at most 1 s.
 
@@ -349,17 +360,18 @@ class ReaderGivesUpEarly(FaultyBackend):
             test_id: Required test marker.
             run_id: Required run marker.
             match_fields: Recipient fields the address must appear in.
+            expected_folder: A folder the wait needs to read.
 
         Returns:
             The CTA link.
         """
         return self.inner.wait_for_link(address, cta, timeout=min(timeout, _GIVE_UP_SEC), test_id=test_id,
-                                        run_id=run_id, match_fields=match_fields)
+                                        run_id=run_id, match_fields=match_fields, expected_folder=expected_folder)
 
     def wait_for_emails(  # pylint: disable=too-many-arguments
         self, address: str, *, cta: Cta | None = None, count: int = 1, timeout: float = 60.0,
         test_id: str | None = None, run_id: str | None = None, match_fields: tuple[str, ...] | None = None,
-        settle_window: float | None = None,
+        settle_window: float | None = None, expected_folder: str | None = None,
     ) -> list[ReceivedEmail]:
         """Wait at most 1 s.
 
@@ -372,13 +384,14 @@ class ReaderGivesUpEarly(FaultyBackend):
             run_id: Required run marker.
             match_fields: Recipient fields the address must appear in.
             settle_window: Seconds to watch for extra emails.
+            expected_folder: A folder the wait needs to read.
 
         Returns:
             The emails, oldest first.
         """
         return self.inner.wait_for_emails(address, cta=cta, count=count, timeout=min(timeout, _GIVE_UP_SEC),
                                           test_id=test_id, run_id=run_id, match_fields=match_fields,
-                                          settle_window=settle_window)
+                                          settle_window=settle_window, expected_folder=expected_folder)
 
 
 def _sink(address: str) -> str:
@@ -483,19 +496,20 @@ class _ProbeExempt(FaultyBackend):
 
     def wait_for_link(  # pylint: disable=too-many-arguments
         self, address: str, cta: Cta, *, timeout: float = 60.0, test_id: str | None = None,
-        run_id: str | None = None, match_fields: tuple[str, ...] | None = None,
+        run_id: str | None = None, match_fields: tuple[str, ...] | None = None, expected_folder: str | None = None,
     ) -> str:
         """Wait through the fault unless it is the probe."""
         target = self.inner if _is_probe(address) else self._faulty
         return target.wait_for_link(address, cta, timeout=timeout, test_id=test_id, run_id=run_id,
-                                    match_fields=match_fields)
+                                    match_fields=match_fields, expected_folder=expected_folder)
 
     def wait_for_emails(  # pylint: disable=too-many-arguments
         self, address: str, *, cta: Cta | None = None, count: int = 1, timeout: float = 60.0,
         test_id: str | None = None, run_id: str | None = None, match_fields: tuple[str, ...] | None = None,
-        settle_window: float | None = None,
+        settle_window: float | None = None, expected_folder: str | None = None,
     ) -> list[ReceivedEmail]:
         """Wait through the fault unless it is the probe."""
         target = self.inner if _is_probe(address) else self._faulty
         return target.wait_for_emails(address, cta=cta, count=count, timeout=timeout, test_id=test_id,
-                                      run_id=run_id, match_fields=match_fields, settle_window=settle_window)
+                                      run_id=run_id, match_fields=match_fields, settle_window=settle_window,
+                                      expected_folder=expected_folder)

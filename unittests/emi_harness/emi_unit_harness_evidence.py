@@ -12,9 +12,10 @@ from emi_harness.evidence import Evidence, safe_name, write_settings
 from emi_harness.inventory_log import InventoryLog
 from emi_harness.jobs import JobController
 from emi_harness.options import resolve
-from emi_harness.plugin import HarnessState, ItemInfo, _observer
+from emi_harness.plugin import HarnessState, ItemInfo, _delete_own_mail, _observer
 from emi_harness.priorities import Job
 from emi_harness.results import ResultsWriter, load_results
+from emi_test_broker import PurgeRefusedError, TestBrokerKeyword
 from emi_reader import EmailWaitError, ReaderCaseKeyword
 
 _RUN_ID = "20261026t153012-w00-a1b2"
@@ -71,6 +72,43 @@ class TestEMIHarnessEvidence:
         assert [record["test_id"] for record in records] == ["C000000", "C400001"]
         assert records[1]["run_id"] == _RUN_ID and records[1]["after"]["total_messages"] == 4
         assert records[1]["timestamp"].endswith("+00:00")
+
+    def EMI_HARNESS_UNIT_200166_delete_own_mail_at_job_end(self) -> None:
+        """Off by default; on, the job's summary line reports the count, and a refusal is a warning naming its
+        keyword, never a test result (AMB-79)."""
+        assert resolve(environ={})["delete_own_mail"] is False
+        resolved = resolve(environ={"EMI_DELETE_OWN_MAIL": "on"})
+        assert resolved["delete_own_mail"] is True
+        made: list[str] = []
+
+        class SimApi:
+            """``EmiApi`` as the plugin uses it."""
+
+            def __init__(self, settings: object, *, run_id: str, refuse: bool = False) -> None:
+                """Record the run ID; ``refuse`` scripts the broker's refusal."""
+                del settings
+                made.append(run_id)
+                self.refuse = refuse
+
+            def __enter__(self) -> "SimApi":
+                """Enter the ``with`` block."""
+                return self
+
+            def __exit__(self, *exc_info: object) -> None:
+                """Nothing to close."""
+
+            def delete_run_mail(self) -> dict[str, object]:
+                """The purge report, or the scripted refusal."""
+                if self.refuse:
+                    raise PurgeRefusedError("Purge refused: 1 run(s) active", TestBrokerKeyword.PURGE_REFUSED)
+                return {"run": "20261026t153012-a1b2", "total": 3, "counts": {"INBOX": 3}}
+
+        line = _delete_own_mail(resolved, _RUN_ID, SimApi)  # type: ignore[arg-type]
+        assert line == "deleted this run's mail (20261026t153012-a1b2): 3 email(s), per folder {'INBOX': 3}"
+        refused = _delete_own_mail(resolved, _RUN_ID, lambda settings, run_id: SimApi(settings, run_id=run_id,
+                                                                                     refuse=True))
+        assert refused.startswith("warning: this run's mail was not deleted: TEST_BROKER_PURGE_REFUSED")
+        assert made == [_RUN_ID, _RUN_ID]
 
     def EMI_HARNESS_UNIT_200122_safe_names(self) -> None:
         """Node IDs become usable folder names."""

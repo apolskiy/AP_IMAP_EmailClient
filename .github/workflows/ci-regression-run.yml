@@ -83,7 +83,7 @@ jobs:
       - name: pylint 10.00/10
         run: >
           python -m pylint --rcfile=.pylintrc --fail-under=10.0
-          emi_reader emi_sender emi_test_broker emi_greenmail emi_api emi_harness tests unittests conftest.py
+          emi_config emi_reader emi_sender emi_test_broker emi_greenmail emi_api emi_harness tests unittests conftest.py
 
   unit:
     needs: lint

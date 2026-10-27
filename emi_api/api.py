@@ -215,7 +215,7 @@ class ReaderApi:
 
     def wait_for_link(  # pylint: disable=too-many-arguments
         self, address: str, cta: Cta, timeout: float | None = None, *, test_id: str | None = None,
-        run_id: str | None = None, match_fields: tuple[str, ...] | None = None,
+        run_id: str | None = None, match_fields: tuple[str, ...] | None = None, expected_folder: str | None = None,
     ) -> str:
         """Wait for an email with the given button and return its link.
 
@@ -227,18 +227,21 @@ class ReaderApi:
             run_id: Also require this run marker.
             match_fields: Recipient fields the address must appear in (``to``, ``cc``, ``bcc``,
                 ``delivered-to``, ``x-original-to``); ``To`` only by default.
+            expected_folder: A configured folder the email is expected in (e.g. ``Spam``); when it cannot be
+                read the wait fails at once with ``READER_MAILBOX_EXPECTED_FOLDER_INACCESSIBLE`` (AMB-85).
 
         Returns:
             The CTA link.
         """
         with self._inventory_observed():
             return self._backend.wait_for_link(address, cta, timeout=timeout or self._default_timeout,
-                                               test_id=test_id, run_id=run_id, match_fields=match_fields)
+                                               test_id=test_id, run_id=run_id, match_fields=match_fields,
+                                               expected_folder=expected_folder)
 
     def wait_for_emails(  # pylint: disable=too-many-arguments
         self, address: str, cta: Cta | None = None, count: int = 1, timeout: float | None = None, *,
         test_id: str | None = None, run_id: str | None = None, match_fields: tuple[str, ...] | None = None,
-        settle_window: float | None = None,
+        settle_window: float | None = None, expected_folder: str | None = None,
     ) -> list[ReceivedEmail]:
         """Wait until exactly ``count`` matching emails are present.
 
@@ -252,6 +255,8 @@ class ReaderApi:
             match_fields: Recipient fields the address must appear in; ``To`` only by default.
             settle_window: Seconds to watch for extra emails after ``count`` arrived; the reader's default
                 (2 s) when None; 0 for mail delivered before the wait.
+            expected_folder: A configured folder the emails are expected in; when it cannot be read the wait
+                fails at once with ``READER_MAILBOX_EXPECTED_FOLDER_INACCESSIBLE`` (AMB-85).
 
         Returns:
             The emails, oldest first.
@@ -260,7 +265,7 @@ class ReaderApi:
             return self._backend.wait_for_emails(address, cta=cta, count=count,
                                                  timeout=timeout or self._default_timeout, test_id=test_id,
                                                  run_id=run_id, match_fields=match_fields,
-                                                 settle_window=settle_window)
+                                                 settle_window=settle_window, expected_folder=expected_folder)
 
     def emails_to(self, addresses: tuple[str, ...], limit: int = 30) -> list[RawEmail]:
         """Every email at the addresses, matched or not, newest first; report evidence, never pass/fail.
@@ -421,6 +426,32 @@ class EmiApi:  # pylint: disable=too-many-instance-attributes
         return Health(mode=str(self.mode), problems=tuple(problems), broker=broker,
                       settings=self._settings.describe())
 
+    # --- cleanup ---------------------------------------------------------------------------------------
+
+    def delete_run_mail(self) -> dict[str, Any]:
+        """Delete this run's mail, every worker's, and nothing else (AMB-79). Releases this API's run lease
+        first, since the broker refuses while the run is active; other runs may go on meanwhile.
+
+        Returns:
+            The purge report: ``{"counts": {folder: n}, "total": n, "run": ..., ...}``.
+
+        Raises:
+            PurgeRefusedError: ``TEST_BROKER_PURGE_REFUSED`` while a worker of this run still holds its lease.
+            ImapConnectionError: If the mailbox cannot be opened or changed.
+        """
+        with self._lock:
+            lease, self._lease = self._lease, None
+        if lease is not None:
+            lease.close()
+        client = _broker_client(self._backend)
+        if client is not None:
+            client.ensure_running(auto_start=self._settings.auto_start)
+            return client.purge(run_id=self._run_id)
+        local = _local_broker(self._backend)
+        if local is None:
+            raise TypeError("the backend has no broker to purge through")
+        return local.purge(run_id=self._run_id)
+
     # --- lifecycle -------------------------------------------------------------------------------------
 
     def close(self) -> None:
@@ -472,6 +503,15 @@ def _broker_client(backend: Any) -> BrokerClient | None:
     lease still go to the client it wraps.
     """
     while not isinstance(backend, BrokerClient):
+        backend = getattr(backend, "inner", None)
+        if backend is None:
+            return None
+    return backend
+
+
+def _local_broker(backend: Any) -> LocalBroker | None:
+    """The in-process broker behind the backend, looking through wrappers as :func:`_broker_client` does."""
+    while not isinstance(backend, LocalBroker):
         backend = getattr(backend, "inner", None)
         if backend is None:
             return None

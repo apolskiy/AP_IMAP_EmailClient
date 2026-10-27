@@ -36,14 +36,14 @@ class MailBackend(Protocol):
 
     def wait_for_link(  # pylint: disable=too-many-arguments
         self, address: str, cta: Cta, *, timeout: float = 60.0, test_id: str | None = None,
-        run_id: str | None = None, match_fields: tuple[str, ...] | None = None,
+        run_id: str | None = None, match_fields: tuple[str, ...] | None = None, expected_folder: str | None = None,
     ) -> str:
         """Wait for an email with the given button and return its link."""
 
     def wait_for_emails(  # pylint: disable=too-many-arguments
         self, address: str, *, cta: Cta | None = None, count: int = 1, timeout: float = 60.0,
         test_id: str | None = None, run_id: str | None = None, match_fields: tuple[str, ...] | None = None,
-        settle_window: float | None = None,
+        settle_window: float | None = None, expected_folder: str | None = None,
     ) -> list[ReceivedEmail]:
         """Wait until exactly ``count`` matching emails are present."""
 
@@ -106,7 +106,7 @@ class LocalBroker:
 
     def wait_for_link(  # pylint: disable=too-many-arguments
         self, address: str, cta: Cta, *, timeout: float = 60.0, test_id: str | None = None,
-        run_id: str | None = None, match_fields: tuple[str, ...] | None = None,
+        run_id: str | None = None, match_fields: tuple[str, ...] | None = None, expected_folder: str | None = None,
     ) -> str:
         """Wait for an email with the given button and return its link.
 
@@ -117,18 +117,20 @@ class LocalBroker:
             test_id: Required test marker.
             run_id: Required run marker.
             match_fields: Recipient fields the address must appear in; ``To`` only by default.
+            expected_folder: A configured folder the wait needs to read (AMB-85); None for no such check.
 
         Returns:
             The CTA link.
         """
         payload = {"address": address, "cta": cta_to_json(cta), "mode": "link", "timeout": timeout,
-                   "test_id": test_id, "run_id": run_id, "match_fields": _fields(match_fields)}
+                   "test_id": test_id, "run_id": run_id, "match_fields": _fields(match_fields),
+                   "expected_folder": expected_folder}
         return str(self._wait(payload)["link"])
 
     def wait_for_emails(  # pylint: disable=too-many-arguments
         self, address: str, *, cta: Cta | None = None, count: int = 1, timeout: float = 60.0,
         test_id: str | None = None, run_id: str | None = None, match_fields: tuple[str, ...] | None = None,
-        settle_window: float | None = None,
+        settle_window: float | None = None, expected_folder: str | None = None,
     ) -> list[ReceivedEmail]:
         """Wait until exactly ``count`` matching emails are present.
 
@@ -142,13 +144,15 @@ class LocalBroker:
             match_fields: Recipient fields the address must appear in; ``To`` only by default.
             settle_window: Seconds to watch for extra emails after ``count`` arrived; the reader's default
                 (2 s) when None; 0 for mail delivered before the wait.
+            expected_folder: A configured folder the wait needs to read (AMB-85); None for no such check.
 
         Returns:
             The emails, oldest first.
         """
         payload = {"address": address, "cta": cta_to_json(cta), "mode": "emails", "count": count,
                    "timeout": timeout, "test_id": test_id, "run_id": run_id,
-                   "match_fields": _fields(match_fields), "settle_window": settle_window}
+                   "match_fields": _fields(match_fields), "settle_window": settle_window,
+                   "expected_folder": expected_folder}
         return [received_from_json(item) for item in self._wait(payload)["emails"]]
 
     @property
@@ -176,6 +180,22 @@ class LocalBroker:
         """
         payload = {"addresses": list(addresses), "limit": limit, "timeout": timeout}
         return [raw_email_from_json(item) for item in self._service.emails(payload)["emails"]]
+
+    def purge(self, *, dry_run: bool = False, older_than_days: int | None = None,
+              everything: bool = False, run_id: str | None = None) -> dict[str, Any]:
+        """The broker's purge, same rules as ``BrokerClient.purge`` (AMB-79 for ``run_id``).
+
+        Args:
+            dry_run: Count only.
+            older_than_days: Only mail older than this many days.
+            everything: Every email, not only EMI-marked mail.
+            run_id: Only this run's mail, every worker's.
+
+        Returns:
+            Counts per folder.
+        """
+        return self._service.purge({"dry_run": dry_run, "older_than_days": older_than_days,
+                                    "everything": everything, "run_id": run_id})
 
     def close(self) -> None:
         """Close every pooled connection."""
