@@ -110,7 +110,43 @@ class TestEMIReaderWait:
         server.deliver("INBOX", make_email(to_addr=_ADDRESS))
         _mailbox(server, clock).wait_for_link(_ADDRESS, Cta.ACTIVATE_ACCOUNT)
         assert set(server.calls) <= {"open", "list_folders", "examine", "status", "uid_search",
-                                     "fetch_headers", "fetch_message", "noop"}
+                                     "fetch_headers", "fetch_message", "fetch_messages", "noop"}
+
+    def EMI_READER_UNIT_100118_other_tests_mail_is_never_fetched(self) -> None:
+        """Polls search new UIDs for the address: mail to other addresses is never fetched (AMB-71).
+
+        Each fetch costs more as the folder fills, while a search does not, so a poll that finds only
+        other tests' mail must cost a search and no fetch.
+        """
+        clock = SimClock()
+        server = SimImap(clock)
+        for index in range(5):
+            server.arrivals.append((1.0 + index, "INBOX", make_email(to_addr=f"qa+other{index}@example.com")))
+        server.arrivals.append((7.0, "INBOX", make_email(to_addr=_ADDRESS)))
+        _mailbox(server, clock).wait_for_link(_ADDRESS, Cta.ACTIVATE_ACCOUNT, timeout=20.0)
+        assert server.calls.count("fetch_messages") == 1
+        assert "fetch_headers" not in server.calls and "fetch_message" not in server.calls
+
+    def EMI_READER_UNIT_100119_many_emails_one_fetch(self) -> None:
+        """Ten emails already in the folder are fetched in one command, not one per email (AMB-71)."""
+        clock = SimClock()
+        server = SimImap(clock)
+        uids = [server.deliver("INBOX", make_email(to_addr=_ADDRESS)) for _index in range(10)]
+        found = _mailbox(server, clock).wait_for_emails(_ADDRESS, cta=Cta.ACTIVATE_ACCOUNT, count=10,
+                                                         settle_window=0.0)
+        assert [item.uid for item in found] == uids and all(item.link for item in found)
+        assert server.calls.count("fetch_messages") == 1
+
+    def EMI_READER_UNIT_100120_poll_search_skips_older_uids(self) -> None:
+        """A poll's ``UID n:*`` search returns the highest UID even when nothing is new; it is not re-matched."""
+        clock = SimClock()
+        server = SimImap(clock)
+        server.deliver("INBOX", make_email(to_addr=_ADDRESS, label="Accept invitation", path="/invite/accept"))
+        server.arrivals.append((1.0, "INBOX", make_email(to_addr="qa+other@example.com")))
+        server.arrivals.append((5.0, "INBOX", make_email(to_addr=_ADDRESS)))
+        link = _mailbox(server, clock).wait_for_link(_ADDRESS, Cta.ACTIVATE_ACCOUNT, timeout=20.0)
+        assert "/activate?" in link
+        assert server.calls.count("fetch_messages") == 2  # the invitation at start, the activation later
 
 
 class TestEMIReaderRecipientFields:

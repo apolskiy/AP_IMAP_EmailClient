@@ -404,12 +404,18 @@ class Mailbox:
             self._consider(state, target, cursor.folder, self._search_address(transport, target))
         return state
 
-    def _search_address(self, transport: ImapTransport, target: _Target) -> list[int]:
-        """Server-side search per selected field; only narrows candidates."""
+    def _search_address(self, transport: ImapTransport, target: _Target, since_uid: int = 0) -> list[int]:
+        """Server-side search per selected field, from ``since_uid`` on; only narrows candidates.
+
+        A search costs about the same however full the folder is, while each fetch does not (AMB-71),
+        so polls search for the address among new UIDs instead of fetching every new message.
+        """
+        uid_range = ("UID", f"{since_uid}:*") if since_uid else ()
         uids: set[int] = set()
         for name in target.match_fields:
-            uids.update(transport.uid_search((*_SEARCH_KEYS[name], f'"{target.address}"')))
-        return sorted(uids)
+            uids.update(transport.uid_search((*uid_range, *_SEARCH_KEYS[name], f'"{target.address}"')))
+        # "n:*" also matches the highest UID when n is above it (RFC 3501), so drop anything older.
+        return sorted(uid for uid in uids if uid >= since_uid)
 
     def _poll(self, state: _WaitState, target: _Target) -> None:
         """Fetch and check UIDs that arrived since the last look, in every readable folder."""
@@ -427,22 +433,20 @@ class Mailbox:
                 continue
             if status.uidnext <= cursor.next_uid:
                 continue
-            new_uids = [uid for uid in transport.uid_search(("UID", f"{cursor.next_uid}:*"))
-                        if uid >= cursor.next_uid]
+            new_uids = self._search_address(transport, target, cursor.next_uid)
             cursor.next_uid = status.uidnext
             self._consider(state, target, cursor.folder, new_uids)
 
     def _consider(self, state: _WaitState, target: _Target, folder: str, uids: list[int]) -> None:
-        """Check candidate UIDs against address, marker and CTA; record matches."""
+        """Fetch the candidate UIDs whole, in one command, and record those matching address, marker and CTA."""
         candidates = [uid for uid in uids if (folder, uid) not in state.matches]
         if not candidates:
             return
-        transport = self._connection()
-        for uid, header_bytes in transport.fetch_headers(candidates).items():
-            headers = parse_email(header_bytes)
-            if not self._header_match(headers, target):
+        for uid, raw in sorted(self._connection().fetch_messages(candidates).items()):
+            email = parse_email(raw)
+            if not self._header_match(email, target):
                 continue
-            match = self._full_match(transport, uid, folder, target)
+            match = self._full_match(email, uid, folder, target)
             if match is not None:
                 state.matches[(folder, uid)] = match
 
@@ -454,11 +458,8 @@ class Mailbox:
             return False
         return target.run_id is None or headers.run_id == target.run_id
 
-    def _full_match(
-        self, transport: ImapTransport, uid: int, folder: str, target: _Target
-    ) -> ReceivedEmail | None:
-        """Fetch the whole message and check it contains the requested CTA."""
-        email = parse_email(transport.fetch_message(uid))
+    def _full_match(self, email: ParsedEmail, uid: int, folder: str, target: _Target) -> ReceivedEmail | None:
+        """Check a whole message contains the requested CTA."""
         if target.cta is None:
             return ReceivedEmail(uid=uid, folder=folder, email=email)
         try:

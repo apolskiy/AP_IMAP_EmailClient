@@ -8,6 +8,18 @@ reasoning behind each decision is in [CLAUDE_LOG.md](CLAUDE_LOG.md).
 ## Unreleased
 
 ### Changed
+* **Waits fetch once per look instead of once per message** (AMB-71). In CI the same test took longer
+  the later it ran in a job (P4: 4.4 s to 7.2 s per test). Measured on Greenmail, a `UID SEARCH` costs
+  about 45 ms at any folder size, but every `UID FETCH` command costs a fixed amount that grows with the
+  folder (about 0.7 s at 5,000 messages). A wait used to fetch the headers of every new message, other
+  tests' mail included, and then each match on its own. It now searches `UID <next>:*` for its address
+  and fetches every candidate whole in one command. A poll that finds nothing costs no fetch. Measured
+  back to back on a 5,054-message folder, one single-email wait went from 1.84-1.99 s to 1.07-1.12 s.
+  Limiting only the first search to recent UIDs was measured too and dropped, since it gained nothing.
+
+## 25b5779 (2026-10-26)
+
+### Changed
 * **Documentation never triggers CI.** The trigger lists already named only code paths, so the change
   log push started nothing; a Markdown file inside a listed folder (a tool's README, a note under
   `.github/`) would still have started a full regression. Both `ci-regression-run` and

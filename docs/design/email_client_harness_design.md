@@ -170,9 +170,20 @@ Details and server limits: §11.
 ### 5.4 Waiting and matching (AMB-07, AMB-08, AMB-22, AMB-38)
 * **Read-only**: `EXAMINE` and `BODY.PEEK[]` only; flags are never changed; `UNSEEN` is never relied on.
 * **Algorithm**: on wait start, `UID SEARCH TO "<full address>"` finds pre-arrived mail; then each poll
-  (default every **2 s ± jitter**) fetches headers of **new UIDs only** and matches them client-side.
-  In service mode one poll loop serves every waiting request. A `UIDVALIDITY` change triggers a full
-  re-search and an info log `READER_IMAP_UIDVALIDITY_CHANGED`.
+  (default every **2 s ± jitter**) searches **new UIDs only** for the address
+  (`UID SEARCH UID <next>:* TO "<full address>"`, one search per selected field) and fetches only what
+  the search returns. All candidates of one look are fetched whole (`BODY.PEEK[]`) in **one `UID FETCH`**
+  and matched client-side on headers, markers and CTA. In service mode one poll loop serves every
+  waiting request. A `UIDVALIDITY` change triggers a full re-search and an info log
+  `READER_IMAP_UIDVALIDITY_CHANGED`.
+* **Why search, then one fetch** (AMB-71): measured on Greenmail, a `UID SEARCH` costs about 45 ms whether
+  the folder holds 1,800 or 4,800 messages, but every `UID FETCH` command costs a fixed amount that grows
+  with the folder (about 110 ms at 1,800 messages, 450-500 ms at 4,800), however many messages it returns.
+  Fetching the headers of every new message on each poll (other tests' mail included) and then each
+  matching message on its own made a 10-email wait cost 11 or more fetches, and waits slowed as a CI
+  job's mailbox filled. A search that returns nothing costs no fetch at all. Measured on a 5,054-message
+  folder, one single-email wait went from 1.84-1.99 s to 1.07-1.12 s. The fetch that remains still costs
+  about 0.7 s at that size; that cost is Greenmail's, and only fewer fetches reduce it.
 * **Recipient match**: exact, case-insensitive, on the selected `match_fields` (**default `To` only**;
   any combination of `To`, `Cc`, `Bcc`, `Delivered-To`, `X-Original-To`), parsed with
   `email.utils.getaddresses`. Server search only narrows candidates (Greenmail matches exactly, Gmail by

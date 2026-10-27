@@ -88,6 +88,9 @@ class ImapTransport(Protocol):
     def fetch_message(self, uid: int) -> bytes:
         """Fetch one full message, without setting flags."""
 
+    def fetch_messages(self, uids: list[int]) -> dict[int, bytes]:
+        """Fetch several full messages in one command, without setting flags."""
+
     def noop(self) -> None:
         """Check the connection is alive."""
 
@@ -321,6 +324,15 @@ class ImaplibTransport:
                 details={"endpoint": self._settings.endpoint, "uid": uid},
             )
         return fetched[uid]
+
+    def fetch_messages(self, uids: list[int]) -> dict[int, bytes]:
+        """Fetch several full messages with one ``UID FETCH ... BODY.PEEK[]`` (flags untouched).
+
+        One command, because a server such as Greenmail spends time per command that grows with the
+        folder, whatever the number of messages (design §5.4, AMB-71). A UID missing from the reply
+        (expunged meanwhile) is simply absent from the result.
+        """
+        return self._fetch(uids, "BODY.PEEK[]")
 
     def _fetch(self, uids: list[int], item: str) -> dict[int, bytes]:
         """Run ``UID FETCH`` and map each UID to its literal."""

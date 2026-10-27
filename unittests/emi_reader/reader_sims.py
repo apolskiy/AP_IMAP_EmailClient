@@ -175,16 +175,22 @@ class SimImap:
         return FolderStatus(len(entry.messages), entry.uidnext, entry.uidvalidity)
 
     def uid_search(self, criteria: tuple[str, ...]) -> list[int]:
-        """Support ``UID n:*`` and exact recipient searches."""
+        """Support ``UID n:*``, exact recipient searches and the two combined (``UID n:* TO "a"``).
+
+        Like a real server, ``n:*`` with ``n`` above every UID still matches the highest UID (RFC 3501).
+        """
         self._enter("uid_search")
         messages = self.folders[self._selected or "INBOX"].messages
+        uids = sorted(messages)
         if criteria[0] == "UID":
             start = int(criteria[1].split(":")[0])
-            return sorted(uid for uid in messages if uid >= start) or ([max(messages)] if messages else [])
+            uids = [uid for uid in uids if uid >= start] or uids[-1:]
+            criteria = criteria[2:]
+        if not criteria:
+            return uids
         field_name = criteria[1] if criteria[0] == "HEADER" else criteria[0]
         address = criteria[-1].strip('"').lower()
-        return sorted(uid for uid, raw in messages.items()
-                      if address in parse_email(raw).addresses_in((field_name.lower(),)))
+        return [uid for uid in uids if address in parse_email(messages[uid]).addresses_in((field_name.lower(),))]
 
     def fetch_headers(self, uids: list[int]) -> dict[int, bytes]:
         """Return header blocks."""
@@ -196,6 +202,12 @@ class SimImap:
         """Return a full message."""
         self._enter("fetch_message")
         return self.folders[self._selected or "INBOX"].messages[uid]
+
+    def fetch_messages(self, uids: list[int]) -> dict[int, bytes]:
+        """Return several full messages in one call (a UID no longer present is left out)."""
+        self._enter("fetch_messages")
+        messages = self.folders[self._selected or "INBOX"].messages
+        return {uid: messages[uid] for uid in uids if uid in messages}
 
     def noop(self) -> None:
         """Do nothing."""
