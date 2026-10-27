@@ -143,6 +143,7 @@ class TestEMIBrokerHttp:
                                      b'{"run_id": "x"}', {"X-EMI-Broker-Token": "wrong"}, 5.0)
         assert status == 401
 
+    @pytest.mark.network
     def EMI_TEST_BROKER_UNIT_130055_second_broker_cannot_bind(
         self, running: tuple[BrokerClient, SimMailboxes]
     ) -> None:
@@ -193,6 +194,7 @@ class TestEMIBrokerAutoStart:
         return BrokerClient(settings or BrokerSettings(), http=_http,
                             spawner=lambda _settings: spawned.append(1), clock=clock.now, sleeper=clock.sleep)
 
+    @pytest.mark.network
     def EMI_TEST_BROKER_UNIT_130060_starts_once_then_ready(self) -> None:
         """Nothing answers: one start, then the new broker answers."""
         settings = BrokerSettings()
@@ -201,6 +203,7 @@ class TestEMIBrokerAutoStart:
         assert self._client([None, None, healthy], spawned, settings).ensure_running()["service"]
         assert spawned == [1]
 
+    @pytest.mark.network
     def EMI_TEST_BROKER_UNIT_130061_still_down_is_unavailable(self) -> None:
         """Still nothing after one start: TEST_BROKER_UNAVAILABLE, no second start."""
         spawned: list[int] = []
@@ -217,12 +220,14 @@ class TestEMIBrokerAutoStart:
         assert caught.value.primary == TestBrokerKeyword.VERSION_MISMATCH and not spawned
         assert caught.value.details["pid"] == 77
 
+    @pytest.mark.network
     def EMI_TEST_BROKER_UNIT_130063_foreign_service_is_port_unavailable(self) -> None:
         """Something else answers on the port: TEST_BROKER_PORT_UNAVAILABLE."""
         with pytest.raises(BrokerUnavailableError) as caught:
             self._client([{"hello": "world"}], []).ensure_running()
         assert caught.value.primary == TestBrokerKeyword.PORT_UNAVAILABLE
 
+    @pytest.mark.network
     def EMI_TEST_BROKER_UNIT_130064_auto_start_off(self) -> None:
         """With auto-start off nothing is started."""
         spawned: list[int] = []
@@ -261,6 +266,7 @@ class TestEMIBrokerLogAndCli:
         assert [line.split(" ", 2)[2] for line in found] == ["TEST_BROKER_PORT_UNAVAILABLE port 8025 x",
                                                              "in window"]
 
+    @pytest.mark.network
     def EMI_TEST_BROKER_UNIT_130073_cli_status_without_broker_exits_3(self, tmp_path: Path) -> None:
         """No broker on the port: exit code 3."""
         assert main(["--port", str(free_port()), "--log-dir", str(tmp_path), "status"]) == 3

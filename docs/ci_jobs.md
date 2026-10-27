@@ -91,6 +91,11 @@ arrives in a folder the reader can open. If not, the job stops at once and every
 The standalone unit jobs run on Windows and Ubuntu. A manual run of `unit-standalone` offers one tool or
 all of them.
 
+**Counts on the run page** (AMB-72): every functional job ends its log with one line, e.g.
+`P2 job: 406 selected, 400 passed, 4 failed, 2 skipped, 0 without a result`, and writes the same counts
+to the run's summary page under a title such as `P2 job (Linux)`, followed by up to 50 tests that did not
+pass with their keyword, step and message. `quality-gate` adds its per-priority report there too.
+
 **Allure on GitHub Pages:** after a run on `main`, the `quality-gate` job builds one Allure report from
 both operating systems' results, and `allure-pages` publishes it. Turn this on once under *Settings →
 Pages → Source: GitHub Actions*. Until then `allure-pages` fails without affecting project status, and

@@ -109,6 +109,7 @@ class TestEMIBrokerSendAndWait:
         with pytest.raises(ValueError):
             service.wait({"address": _ADDRESS, "timeout": 1})
 
+    @pytest.mark.network
     def EMI_TEST_BROKER_UNIT_130017_budget_exhausted_is_connection_limit(self, tmp_path: Path) -> None:
         """All connections busy for the whole wait: READER_IMAP_CONNECTION_LIMIT, environment failure."""
         service, mailboxes, *_sims = make_service(tmp_path, max_connections=1)
@@ -224,6 +225,7 @@ class TestEMIBrokerPurge:
         assert search_criteria(PurgeRequest(), today) == 'HEADER X-EMI-Test-Id ""'
         assert search_criteria(PurgeRequest(everything=True, older_than_days=7), today) == "ALL BEFORE 19-Oct-2026"
 
+    @pytest.mark.network
     def EMI_TEST_BROKER_UNIT_130035_unreachable_server_has_reader_keyword(self, tmp_path: Path) -> None:
         """The purge connection failing is classified like the reader's."""
         service, *_sims = make_service(tmp_path)

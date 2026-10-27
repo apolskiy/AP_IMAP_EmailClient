@@ -133,6 +133,7 @@ class TestEMIApiInprocess:
         assert health.ready and health.mode == "inprocess" and health.keywords == ("", ())
         assert health.broker is not None and health.broker["service"] == "emi_test_broker"
 
+    @pytest.mark.network
     def EMI_API_UNIT_300045_health_greenmail_down(self, tmp_path: Path) -> None:
         """Greenmail not ready: health says why with the keywords and never raises."""
         error = GreenmailNotReadyError("imap port 3143 closed", GreenmailKeyword.IMAP_CONNECTION_FAILURE,
@@ -198,6 +199,7 @@ class TestEMIApiService:
                 api.reader.wait_for_link(api.start_run("400001").address(), Cta.ACTIVATE_ACCOUNT, timeout=5.0)
         assert caught.value.primary == ReaderCaseKeyword.EMAIL_NOT_RECEIVED
 
+    @pytest.mark.network
     def EMI_API_UNIT_300053_health_broker_down(self, tmp_path: Path) -> None:
         """No broker and no auto-start: health reports TEST_BROKER_UNAVAILABLE without raising."""
         settings = BrokerSettings(port=free_port(), log_dir=tmp_path / "logs", state_dir=tmp_path / "state")

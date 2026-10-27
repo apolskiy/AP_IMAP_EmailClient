@@ -7,6 +7,25 @@ reasoning behind each decision is in [CLAUDE_LOG.md](CLAUDE_LOG.md).
 
 ## Unreleased
 
+### Added
+* **Job counts in the CI log and on the run page** (AMB-72). A job's log said only that it passed, and the
+  run page showed a green or red mark; the counts were only in `report.html`. Every functional job now ends
+  with a line such as `P2 job: 406 selected, 400 passed, 4 failed, 2 skipped, 0 without a result`, taken
+  from the harness results so it agrees with the gates. In GitHub Actions each job also writes the counts
+  and up to 50 tests that did not pass (keyword, step, message) to its step summary, titled with the job
+  and operating system, and `quality-gate` writes its per-priority report there. Harness unit tests clear
+  `GITHUB_STEP_SUMMARY`, so they never write to a real run page.
+* **Test counts in the README** (AMB-73). The README gave only the functional total. It now counts unit
+  tests per tool with their network tests, functional tests per family and priority, and the totals:
+  1,442 tests, of which 423 are unit tests (50 network) and 1,019 functional. Functional tests are counted
+  by family because each one drives the sender, test broker and reader together.
+* **`network` marker on the network-fault unit tests** (AMB-73). Nothing marked them, so they could be
+  neither counted nor run alone. The 28 tests that make a connection fail (refused, closed port, port
+  taken, dropped or reset, timed out, connection limit, server down) and check the tool's keyword, retry
+  decision or exit code now carry it; `python -m pytest unittests -m network` runs them.
+
+## 7fdcc54 (2026-10-26)
+
 ### Changed
 * **Waits fetch once per look instead of once per message** (AMB-71). In CI the same test took longer
   the later it ran in a job (P4: 4.4 s to 7.2 s per test). Measured on Greenmail, a `UID SEARCH` costs

@@ -172,6 +172,7 @@ server; the functional tests need Greenmail from step 3 running.
 ```bash
 pylint --rcfile=.pylintrc emi_reader emi_sender emi_test_broker emi_greenmail emi_api emi_harness tests unittests conftest.py
 python -m pytest unittests                       # all unit tests
+python -m pytest unittests -m network            # only the network-fault unit tests
 python -m emi_harness.cli                        # every functional test (job "all")
 python -m emi_harness.cli --priority P0         # one job: P0, P1, P2, P3, P4, P2-P4, debug or all
 python -m emi_harness.cli --test C400001        # one test: case ID, function name or node ID; repeatable
@@ -264,6 +265,11 @@ after each run on `main`.
   skipped tests here, so the tab is empty when everything passed.
 * A test that ran on both Windows and Ubuntu appears once, with the other run under **Retries**.
 
+**Counts without opening a report.** Every job ends with a line such as
+`P2 job: 406 selected, 400 passed, 4 failed, 2 skipped, 0 without a result`. In GitHub Actions the same
+counts, and up to 50 tests that did not pass with their keyword, appear on the run's summary page under
+each job, next to the quality gate's report.
+
 ### Using another mail server, and credentials
 
 The project targets **Greenmail** and needs no credentials beyond the local `qa` user above. To run
@@ -293,6 +299,43 @@ user `qa` with the public password `password`, so nothing needs configuring. To 
 3. In CI, add a repository secret `EMI_GREENMAIL_PASSWORD`; the workflows start Greenmail with it and
    pass it to the tests as `EMI_IMAP_PASSWORD` / `EMI_SMTP_PASSWORD`.
 * Real servers limit simultaneous connections; see [IMAP Connection Limit](#imap-connection-limit).
+
+## Test Counts
+
+**1,442 tests in total: 423 unit tests (50 of them network tests) and 1,019 functional tests.**
+
+**Unit tests**, one folder per tool, no server needed. A **network test** makes a connection fail
+(refused, closed port, port already taken, dropped or reset mid-session, timed out, connection limit,
+server down) and checks the tool's keyword, retry decision or exit code. These tests carry the `network`
+marker, so `python -m pytest unittests -m network` runs them alone.
+
+| Tool | Folder | Unit tests | Of which network |
+|---|---|---|---|
+| Reader | `unittests/emi_reader/` | 84 | 19 |
+| Sender | `unittests/emi_sender/` | 69 | 15 |
+| Test broker | `unittests/emi_test_broker/` | 54 | 8 |
+| Greenmail client | `unittests/emi_greenmail/` | 23 | 6 |
+| Central API (`EmiApi`) | `unittests/emi_api/` | 57 | 2 |
+| Harness | `unittests/emi_harness/` | 136 | 0 |
+| **Total** | | **423** | **50** |
+
+**Functional tests** (`tests/functional/`, against Greenmail). Every functional test goes through the
+public API, so it drives the sender, the test broker and the reader together. The suite is therefore
+counted by test family, not by tool:
+
+| Family | Module | Tests | P0 | P1 | P2 | P3 | P4 |
+|---|---|---|---|---|---|---|---|
+| Delivery basics | `emi_func_delivery.py` | 8 | 5 | | 1 | 2 | |
+| Counts per kind and field | `emi_func_counts.py` | 99 | | 9 | 81 | 9 | |
+| Recipient fields | `emi_func_fields.py` | 9 | | | 9 | | |
+| Markers | `emi_func_markers.py` | 15 | | | 12 | 3 | |
+| Arrival during the wait | `emi_func_timing.py` | 15 | | | 15 | | |
+| Isolation | `emi_func_isolation.py` | 9 | | | | 9 | |
+| Batches | `emi_func_batches.py` | 864 | | | 288 | 288 | 288 |
+| **Total** | | **1,019** | **5** | **9** | **406** | **311** | **288** |
+
+These counts were taken on 2026-10-26. `python -m pytest unittests --collect-only -q` (add `-m network`) and
+`python -m pytest tests --emi-job all --collect-only -q` recount them.
 
 ## Test Priorities and Failing Fast
 
@@ -392,7 +435,7 @@ says how much of it is built.
 
 | File | What it contains |
 |---|---|
-| [docs/design/phase0_email_client_ambiguities.md](docs/design/phase0_email_client_ambiguities.md) | **Ambiguity register (Phase 0).** Every open question (AMB-01 to AMB-70) with its severity, the options considered, the recommendation and the author's decision; the status of open questions; **Spike Evidence**: measurements and bugs found against a live Greenmail that decisions rest on. |
+| [docs/design/phase0_email_client_ambiguities.md](docs/design/phase0_email_client_ambiguities.md) | **Ambiguity register (Phase 0).** Every open question (AMB-01 to AMB-73) with its severity, the options considered, the recommendation and the author's decision; the status of open questions; **Spike Evidence**: measurements and bugs found against a live Greenmail that decisions rest on. |
 | [docs/design/email_client_harness_design.md](docs/design/email_client_harness_design.md) | **Design document (Phase 2)**, each section citing the register rows it implements (see the next table). |
 | [docs/rtm.md](docs/rtm.md) | **Requirements traceability matrix.** Each requirement → design section → code → unit test IDs → status (Done / Partial with the gap named / Planned). |
 | [docs/keywords.md](docs/keywords.md) | **Failure keyword catalog.** Keyword grammar; every `READER_`, `SENDER_`, `TEST_BROKER_`, `GREENMAIL_`, `API_`, `HARNESS_`, `CASE_` and `JOB_` keyword with its meaning, outcome (fail / skip / skip + stop / info) and the first thing to check. A unit test fails if code uses a keyword missing here. |

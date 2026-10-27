@@ -27,6 +27,7 @@ class TestEMIGreenmailReadiness:
         assert result.ready
         assert [probe.name for probe in result.probes] == ["api", "smtp", "imap"]
 
+    @pytest.mark.network
     def EMI_GREENMAIL_UNIT_120002_api_down_is_not_ready(self) -> None:
         """Nothing on 8080: GREENMAIL_NOT_READY naming the host:port probed, as an environment failure."""
         server = SimGreenmail()
@@ -37,6 +38,7 @@ class TestEMIGreenmailReadiness:
         assert caught.value.infrastructure
         assert "api 127.0.0.1:8080" in str(caught.value) and "README" in str(caught.value)
 
+    @pytest.mark.network
     def EMI_GREENMAIL_UNIT_120003_closed_mail_port_is_not_ready(self) -> None:
         """API answers but IMAP is not published: IMAP keyword leads, only the failed endpoint is named."""
         server = SimGreenmail()
@@ -47,6 +49,7 @@ class TestEMIGreenmailReadiness:
         assert caught.value.primary == GreenmailKeyword.IMAP_CONNECTION_FAILURE
         assert caught.value.secondary == (GreenmailKeyword.NOT_READY,)
 
+    @pytest.mark.network
     def EMI_GREENMAIL_UNIT_120008_closed_smtp_port_has_smtp_keyword(self) -> None:
         """SMTP closed: GREENMAIL_SMTP_CONNECTION_FAILURE leads."""
         server = SimGreenmail()
@@ -55,6 +58,7 @@ class TestEMIGreenmailReadiness:
             server.client().check_ready()
         assert caught.value.primary == GreenmailKeyword.SMTP_CONNECTION_FAILURE
 
+    @pytest.mark.network
     def EMI_GREENMAIL_UNIT_120009_both_ports_closed(self) -> None:
         """SMTP and IMAP closed, API up: the first failed protocol leads, the other is secondary."""
         server = SimGreenmail()
@@ -64,6 +68,7 @@ class TestEMIGreenmailReadiness:
         assert caught.value.primary == GreenmailKeyword.SMTP_CONNECTION_FAILURE
         assert caught.value.secondary == (GreenmailKeyword.IMAP_CONNECTION_FAILURE, GreenmailKeyword.NOT_READY)
 
+    @pytest.mark.network
     def EMI_GREENMAIL_UNIT_120010_server_down_keeps_not_ready_primary(self) -> None:
         """API and ports down: the server is down, GREENMAIL_NOT_READY leads, ports are context."""
         server = SimGreenmail()
@@ -166,6 +171,7 @@ class TestEMIGreenmailManagement:
         assert caught.value.details["status"] == 400 and "User not found" in str(caught.value)
         assert not caught.value.infrastructure
 
+    @pytest.mark.network
     def EMI_GREENMAIL_UNIT_120026_unreachable_api_is_not_ready(self) -> None:
         """A management call to a stopped server raises GREENMAIL_NOT_READY, not an API error."""
         server = SimGreenmail()

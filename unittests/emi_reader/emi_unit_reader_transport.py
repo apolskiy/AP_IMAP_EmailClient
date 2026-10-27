@@ -47,6 +47,7 @@ class TestEMIReaderFaultClassification:
     """Every low-level failure gets the right keyword and retry decision (design §5.5)."""
 
     @pytest.mark.parametrize(("error", "phase", "keyword", "retryable"), _CASES)
+    @pytest.mark.network
     def EMI_READER_UNIT_100040_classifies_fault(
         self, error: BaseException, phase: Phase, keyword: ReaderKeyword, retryable: bool
     ) -> None:
@@ -57,6 +58,7 @@ class TestEMIReaderFaultClassification:
         assert classified.infrastructure is True
         assert classified.details["endpoint"] == "127.0.0.1:3143"
 
+    @pytest.mark.network
     def EMI_READER_UNIT_100041_keeps_original_socket_error(self) -> None:
         """The errno hidden inside imaplib's abort is reported."""
         classified = classify(_wrapped_abort(ConnectionAbortedError(10053, "aborted")), Phase.COMMAND, "h:1")
@@ -83,6 +85,7 @@ class TestEMIReaderAccessibility:
         (ReaderKeyword.IMAP_AUTH_FAILED, Access.LOGIN_FAILED),
         (ReaderKeyword.IMAP_CONNECTION_REFUSED, Access.NETWORK_ERROR),
     ])
+    @pytest.mark.network
     def EMI_READER_UNIT_100051_login_and_network_failures_mark_all_folders(
         self, keyword: ReaderKeyword, state: Access
     ) -> None:

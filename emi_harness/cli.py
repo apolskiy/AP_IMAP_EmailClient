@@ -10,7 +10,8 @@ python -m emi_harness.cli --keyword READER_IMAP_       # tests tied to a keyword
 python -m emi_harness.cli --priority P0 -n 4           # one job, 4 workers
 ```
 Every ``--emi-*`` option is passed to pytest unchanged. Reports go to ``reports/<run>/<job>/`` (JUnit XML,
-HTML, results, Allure results with ``--allure``).
+HTML, results, Allure results with ``--allure``). The job ends with a counts line and, in GitHub Actions, a
+step summary section (``emi_harness.summary``).
 
 Exit codes: 0 the job passed; 1 the job failed (P0/P1: any test not passed, a P0 failure also printed as
 JOB_CRITICAL_FUNCTIONAL_FAILURE; P2-P4: under 85% passed; P2, P3, P4 alone: never, since their 85% holds
@@ -31,11 +32,13 @@ from pathlib import Path
 import pytest
 
 from emi_api import RunId
+from emi_harness.gate import missing_results
 from emi_harness.jobs import read_stop
 from emi_harness.keywords import JobKeyword
 from emi_harness.options import add_arguments, cli_values, pass_through, read_dotenv, resolve
 from emi_harness.priorities import LOW_GATE, Job, job_name
 from emi_harness.results import job_dir, load_results
+from emi_harness.summary import job_counts, report_job
 
 EXIT_PASSED, EXIT_FAILED, EXIT_ABORTED, EXIT_USAGE = 0, 1, 2, 4
 _UPSTREAM = {Job.P1: (Job.P0,), **dict.fromkeys((Job.P2, Job.P3, Job.P4, Job.P2_P4), (Job.P0, Job.P1))}
@@ -127,6 +130,7 @@ def main(argv: Sequence[str] | None = None, runner: PytestRunner = pytest.main) 
     if args.allure:
         _allure_html(directory / "allure-results", directory / "allure-report")
     print(f"reports: {directory}")
+    report_job(job_counts(str(job), load_results(directory), missing_results(directory)))
     return _job_exit(directory, job, int(code))
 
 

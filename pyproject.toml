@@ -21,6 +21,8 @@ python_classes = ["TestEMI*"]
 python_functions = ["EMI_*"]
 testpaths = ["unittests", "tests"]
 addopts = "-p no:randomly"
+# Design §13.2 (AMB-73): network-fault tests, run alone with -m network.
+markers = ["network: a connection fails (refused, dropped, timed out, port taken, limit) and the tool's handling is checked"]
 # Design §13.4: the harness counts passing asserts, so a functional test that checks nothing fails
 # with CASE_NO_VERIFICATION.
 enable_assertion_pass_hook = true

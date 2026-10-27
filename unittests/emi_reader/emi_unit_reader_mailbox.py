@@ -250,6 +250,7 @@ class TestEMIReaderCounts:
 class TestEMIReaderNetworkFaults:
     """Retry only what retrying can fix; report outages as outages (design §5.5)."""
 
+    @pytest.mark.network
     def EMI_READER_UNIT_100090_drop_is_retried_and_wait_succeeds(self) -> None:
         """A dropped connection mid-wait reconnects and still finds the email."""
         clock = SimClock()
@@ -261,6 +262,7 @@ class TestEMIReaderNetworkFaults:
         assert server.opens == 2
         assert [attempt["keyword"] for attempt in mailbox.attempts] == [ReaderKeyword.IMAP_CONNECTION_DROPPED]
 
+    @pytest.mark.network
     def EMI_READER_UNIT_100091_server_down_fails_at_once(self) -> None:
         """Connection refused is not retried: the error surfaces immediately with its own keyword."""
         clock = SimClock()
@@ -285,6 +287,7 @@ class TestEMIReaderNetworkFaults:
         assert caught.value.infrastructure is True
         assert {row["state"] for row in mailbox.access_matrix} == {"select_denied", "not_listed"}
 
+    @pytest.mark.network
     def EMI_READER_UNIT_100092_outage_until_deadline_reports_network_keyword(self) -> None:
         """If the last attempt failed on the network, the outage is primary, not 'not received'."""
         clock = SimClock()
@@ -295,6 +298,7 @@ class TestEMIReaderNetworkFaults:
         assert caught.value.primary == ReaderKeyword.IMAP_CONNECTION_DROPPED
         assert caught.value.details["attempts"]
 
+    @pytest.mark.network
     def EMI_READER_UNIT_100093_backoff_is_capped(self) -> None:
         """Reconnect delays follow 0.5, 1, 2, 4, 5 and then stay at 5 seconds."""
         clock = SimClock()

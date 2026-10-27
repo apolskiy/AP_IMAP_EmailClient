@@ -41,6 +41,7 @@ class TestEMISenderClassification:
         (ssl.SSLError("handshake"), SenderKeyword.SMTP_TLS_HANDSHAKE_FAILED),
         (smtplib.SMTPAuthenticationError(535, b"bad credentials"), SenderKeyword.SMTP_AUTH_FAILED),
     ])
+    @pytest.mark.network
     def EMI_SENDER_UNIT_110040_connect_faults_are_fatal(self, error: BaseException, keyword: str) -> None:
         """Server down, DNS, TLS and auth faults are never retried."""
         classified = classify_connect(error, "127.0.0.1:3025")
@@ -56,6 +57,7 @@ class TestEMISenderClassification:
         (_wrapped(ConnectionAbortedError(10053, "aborted")), SenderKeyword.SMTP_SOCKET_WRITE_FAILED, True),
         (smtplib.SMTPServerDisconnected("closed"), SenderKeyword.SMTP_CONNECTION_DROPPED, True),
     ])
+    @pytest.mark.network
     def EMI_SENDER_UNIT_110041_send_faults(self, error: BaseException, keyword: str, retryable: bool) -> None:
         """Rejections are not retried (except 4xx); mid-session network faults are."""
         classified = classify_send(error, "127.0.0.1:3025")
@@ -73,6 +75,7 @@ class TestEMISenderBatches:
         assert all(entry.status == "sent" and entry.link and entry.message_id for entry in manifest.entries)
         assert len(outbox.delivered) == 2
 
+    @pytest.mark.network
     def EMI_SENDER_UNIT_110051_healable_fault_is_retried(self) -> None:
         """A dropped connection is retried with backoff and the email is still sent."""
         outbox = SimOutbox()
@@ -82,6 +85,7 @@ class TestEMISenderBatches:
         assert manifest[0].status == "sent" and manifest[0].attempts == 2
         assert clock.sleeps == [0.5]
 
+    @pytest.mark.network
     def EMI_SENDER_UNIT_110052_server_down_is_exit_3_and_stops_the_lane(self) -> None:
         """Refused: not retried, the rest of the lane is not attempted, exit code 3."""
         outbox = SimOutbox()
@@ -156,6 +160,7 @@ class TestEMISenderCli:
         """Cyrillic test ID, out-of-range concurrency, too few addresses for the preset."""
         assert main(["--to", _ADDRESS, "--activation", "1", *bad_args], sender=_sender(SimOutbox())) == 2
 
+    @pytest.mark.network
     def EMI_SENDER_UNIT_110064_unreachable_exits_3(self) -> None:
         """Server down → exit code 3."""
         outbox = SimOutbox()

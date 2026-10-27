@@ -7,11 +7,12 @@ a named fault (``--emi-fault``, design §13.4). A test a job selected but wrote 
 passed (``JOB_RESULT_MISSING``). ``--expect P2`` names a job that was chosen to run: a directory without its
 ``collection.json`` (the job never started, or failed before selecting tests, so its tests are not even
 known) fails the gate with ``JOB_RESULT_MISSING``. Each directory is checked on its own, so CI passes one
-directory per operating system.
+directory per operating system. In GitHub Actions the report is also appended to the step summary (AMB-72).
 """
 
 import argparse
 import json
+import os
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -20,6 +21,7 @@ from emi_harness.keywords import JobKeyword
 from emi_harness.outcomes import Status, TestOutcome
 from emi_harness.priorities import Job, evaluate_gates, job_name
 from emi_harness.results import load_results
+from emi_harness.summary import append_step_summary
 
 _COLLECTION_FILE = "collection.json"
 
@@ -58,7 +60,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(report.render())
     if absent:
         print(f"gate failed: {len(absent)} chosen job(s) left no record of their tests", file=sys.stderr)
-    return 0 if report.holds and not absent else 1
+    holds = report.holds and not absent
+    append_step_summary(_gate_markdown(report.render(), absent, holds), os.environ)
+    return 0 if holds else 1
+
+
+def _gate_markdown(rendered: str, absent: Sequence[str], holds: bool) -> str:
+    """The gate's step summary section: verdict, absent jobs and the report as printed."""
+    lines = [f"### Quality gate: {'PASS' if holds else 'FAIL'}", ""]
+    lines.extend(f"* {JobKeyword.RESULT_MISSING}: {line}" for line in absent)
+    lines.extend(["", "```", rendered, "```", ""])
+    return "\n".join(lines) + "\n"
 
 
 def absent_jobs(directories: Sequence[Path], expected: Sequence[str]) -> list[str]:

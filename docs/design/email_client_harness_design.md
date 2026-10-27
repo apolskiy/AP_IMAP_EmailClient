@@ -527,6 +527,24 @@ history. Output in `reports/<run id>/`.
     cause) and message `[KEYWORD] step Snn message (secondary: ...)`. Allure would otherwise record the
     exception text without the keyword, and no message at all for failures the harness decides itself
     (`CASE_NO_VERIFICATION`, `CASE_TIMEOUT`).
+* **Job counts** (AMB-72, `emi_harness/summary.py`). A CI job's log otherwise shows only pytest's own
+  line, and the run page only a green or red mark. The counts come from the job's harness results, so
+  they agree with the gates:
+  * **Selected**: the tests in the job's `collection.json`.
+  * **Passed**, **failed**, **skipped**: by the harness verdict of each result (a downgraded or dependency
+    skip counts as skipped).
+  * **Without a result**: selected but no result written (`JOB_RESULT_MISSING`, as in the gate).
+  * At the end of every job the CLI prints one line, e.g.
+    `P2 job: 406 selected, 400 passed, 4 failed, 2 skipped, 0 without a result`.
+  * When `GITHUB_STEP_SUMMARY` is set (GitHub Actions), the CLI also appends a Markdown table to it,
+    titled `P2 job (Linux)` from `RUNNER_OS`, with the same counts, followed by the tests that did not
+    pass (case ID, status, primary keyword, step and message), at most 50. When there are more, a last
+    line gives the rest's count and points at `report.html`. GitHub shows this on the run page under the
+    job.
+  * `python -m emi_harness.gate` appends its per-priority report to the step summary the same way, so the
+    `quality-gate` job shows the measured shares next to the jobs' counts.
+  * Writing the summary never changes a job's exit code: if the file cannot be written, a warning is
+    printed and the job ends as it would have.
 
 ## 10. Time Budgets (AMB-22, AMB-49)
 
@@ -648,6 +666,12 @@ downgrades, circuit breaker, dependency cascade, keyword-catalog completeness, d
 
 Expected faults are passes when handled correctly; they never trigger the infrastructure job-stop rule
 or the circuit breaker.
+
+**Marker** (AMB-73): every test of these layers carries `@pytest.mark.network` (registered in
+`pyproject.toml`): a test that makes a connection fail (refused, closed port, port already taken, dropped
+or reset mid-session, timed out, connection limit, server down) and checks the tool's keyword, retry
+decision or exit code. `pytest unittests -m network` runs them alone, and the README's test counts come
+from `--collect-only` with and without it.
 
 ### 13.3 Functional tests (`tests/`, against Greenmail)
 * Delivery: SMTP send per CTA kind (activation, invitation), `APPEND`, pre-arrived mail, mail arriving
