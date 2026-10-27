@@ -10,6 +10,7 @@ process, so both modes apply the same connection budget, pooling and errors; onl
 import getpass
 import os
 import socket
+import threading
 from typing import Any, Protocol
 
 from emi_reader import Cta, RawEmail, ReceivedEmail
@@ -60,6 +61,7 @@ class LocalBroker:
             service: The in-process service (owns the connection pool).
         """
         self._service = service
+        self._local = threading.local()
 
     @property
     def service(self) -> BrokerService:
@@ -121,7 +123,7 @@ class LocalBroker:
         """
         payload = {"address": address, "cta": cta_to_json(cta), "mode": "link", "timeout": timeout,
                    "test_id": test_id, "run_id": run_id, "match_fields": _fields(match_fields)}
-        return str(self._service.wait(payload)["link"])
+        return str(self._wait(payload)["link"])
 
     def wait_for_emails(  # pylint: disable=too-many-arguments
         self, address: str, *, cta: Cta | None = None, count: int = 1, timeout: float = 60.0,
@@ -147,7 +149,19 @@ class LocalBroker:
         payload = {"address": address, "cta": cta_to_json(cta), "mode": "emails", "count": count,
                    "timeout": timeout, "test_id": test_id, "run_id": run_id,
                    "match_fields": _fields(match_fields), "settle_window": settle_window}
-        return [received_from_json(item) for item in self._service.wait(payload)["emails"]]
+        return [received_from_json(item) for item in self._wait(payload)["emails"]]
+
+    @property
+    def last_inventory(self) -> dict[str, Any] | None:
+        """This thread's latest successful wait's mailbox inventory (AMB-76); a failed wait's is in its error."""
+        return getattr(self._local, "inventory", None)
+
+    def _wait(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """The service's wait, keeping the inventory the answer carries."""
+        self._local.inventory = None
+        answer = self._service.wait(payload)
+        self._local.inventory = answer.get("inventory")
+        return answer
 
     def emails_to(self, addresses: tuple[str, ...], limit: int = 30, timeout: float = 30.0) -> list[RawEmail]:
         """Every email at a failed test's addresses, for its report (AMB-74).

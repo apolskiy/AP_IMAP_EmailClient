@@ -20,9 +20,14 @@ python_files = ["emi_*.py"]
 python_classes = ["TestEMI*"]
 python_functions = ["EMI_*"]
 testpaths = ["unittests", "tests"]
-addopts = "-p no:randomly"
+# Design §13.2 (AMB-77): the outage tests stop Greenmail, so the default run leaves them out;
+# -m docker (or any -m on the command line) replaces this selection.
+addopts = '-p no:randomly -m "not docker"'
 # Design §13.2 (AMB-73): network-fault tests, run alone with -m network.
-markers = ["network: a connection fails (refused, dropped, timed out, port taken, limit) and the tool's handling is checked"]
+markers = [
+    "network: a connection fails (refused, dropped, timed out, port taken, limit) and the tool's handling is checked",
+    "docker: stops and starts the real Greenmail container (unittests/outage/, run with -m docker)",
+]
 # Design §13.4: the harness counts passing asserts, so a functional test that checks nothing fails
 # with CASE_NO_VERIFICATION.
 enable_assertion_pass_hook = true

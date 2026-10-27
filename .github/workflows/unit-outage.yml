@@ -1,0 +1,60 @@
+# SPDX-FileCopyrightText: 2026 Aleksandr Polskiy
+# SPDX-License-Identifier: Apache-2.0
+# unit-outage (design §12, §13.2, AMB-77): network fault layer 3. Stops and restarts this job's own
+# Greenmail container under the reader, the sender and the API (unittests/outage/, marker docker).
+# Ubuntu only (Windows runners have no Linux containers). By hand, weekly, and when the outage tests
+# change. Never affects project status; ci-regression-run's unit job leaves these tests out.
+name: unit-outage
+
+on:
+  schedule:
+    - cron: "0 4 * * 1"
+  push:
+    paths:
+      - "unittests/outage/**"
+      - "!**/*.md"
+  pull_request:
+    branches: [main]
+    paths:
+      - "unittests/outage/**"
+      - "!**/*.md"
+  workflow_dispatch:
+
+concurrency:
+  group: >-
+    unit-outage-${{ (github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main')
+    && github.run_id || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  outage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      EMI_GREENMAIL_CONTAINER: greenmail_server
+      EMI_IMAP_PASSWORD: ${{ secrets.EMI_GREENMAIL_PASSWORD || 'password' }}
+      EMI_SMTP_PASSWORD: ${{ secrets.EMI_GREENMAIL_PASSWORD || 'password' }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+      - run: python -m pip install -r requirements.txt -r requirements-dev.txt
+      - uses: ./.github/actions/start-greenmail
+        with:
+          password: ${{ secrets.EMI_GREENMAIL_PASSWORD || 'password' }}
+      - name: Outage tests
+        run: python -m pytest unittests/outage -m docker -p no:cacheprovider --junitxml=reports/unit-outage/junit.xml
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-outage-${{ github.run_id }}
+          path: reports/unit-outage/
+          if-no-files-found: warn

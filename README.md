@@ -206,10 +206,12 @@ operating systems in about 20 minutes.
 
 Reports go to `reports/<run>/<job>/`: `junit.xml`, `report.html`, `results-<worker>.jsonl` (one line
 per test with its keywords and step log), `settings.json` (every setting with its source, passwords
-hidden), `attachments/<case id>/` (per-test evidence: sender manifests, a failing tool's attempt
-history and folder accessibility matrix, anything a test attaches, and for a test that failed or was
-skipped every email at its addresses as an `.eml` file, matched or not, plus the test broker's log lines
-naming it) and, with `--allure`,
+hidden), `inventory-<worker>.jsonl` (one line per wait: folder totals and the emails at the test's
+address by kind, before and after, for analysis across runs; never used for pass/fail),
+`attachments/<case id>/` (per-test evidence: sender manifests, each wait's mailbox inventory, a failing
+tool's attempt history and folder accessibility matrix, anything a test attaches, and for a test that
+failed or was skipped every email at its addresses as an `.eml` file, matched or not, plus the test
+broker's log lines naming it) and, with `--allure`,
 `allure-results/` (HTML too when the Allure CLI is installed, see step 5). Exit codes: `0` the job passed, `1` it failed, `2` it stopped early or an
 earlier job of the run aborted, `4` invalid options, `5` no tests selected.
 
@@ -310,22 +312,31 @@ user `qa` with the public password `password`, so nothing needs configuring. To 
 
 ## Test Counts
 
-**1,450 tests in total: 431 unit tests (50 of them network tests) and 1,019 functional tests.**
+**1,472 tests in total: 453 unit tests (61 of them network tests, 4 outage tests run apart) and 1,019
+functional tests.**
 
 **Unit tests**, one folder per tool, no server needed. A **network test** makes a connection fail
 (refused, closed port, port already taken, dropped or reset mid-session, timed out, connection limit,
 server down) and checks the tool's keyword, retry decision or exit code. These tests carry the `network`
-marker, so `python -m pytest unittests -m network` runs them alone.
+marker, so `python -m pytest unittests -m network` runs them alone. Some go through a fault proxy
+(`unittests/netfaults/`) that breaks real connections between the real IMAP or SMTP client and a small
+simulated server.
 
-| Tool | Folder | Unit tests | Of which network |
-|---|---|---|---|
-| Reader | `unittests/emi_reader/` | 86 | 19 |
-| Sender | `unittests/emi_sender/` | 69 | 15 |
-| Test broker | `unittests/emi_test_broker/` | 55 | 8 |
-| Greenmail client | `unittests/emi_greenmail/` | 23 | 6 |
-| Central API (`EmiApi`) | `unittests/emi_api/` | 57 | 2 |
-| Harness | `unittests/emi_harness/` | 141 | 0 |
-| **Total** | | **431** | **50** |
+**Outage tests** (`unittests/outage/`, marker `docker`) stop and restart the real Greenmail container
+under the reader, the sender and the API. The default unit run leaves them out;
+`python -m pytest unittests/outage -m docker` runs them. They restart the container named
+`greenmail_server` (or `EMI_GREENMAIL_CONTAINER`), which empties its mailbox, so never run them next
+to a functional run. Without Docker or the container they are skipped (`HARNESS_DOCKER_UNAVAILABLE`).
+
+| Tool | Folder | Unit tests | Of which network | Outage |
+|---|---|---|---|---|
+| Reader | `unittests/emi_reader/` | 96 | 26 | 2 |
+| Sender | `unittests/emi_sender/` | 73 | 19 | 1 |
+| Test broker | `unittests/emi_test_broker/` | 56 | 8 | |
+| Greenmail client | `unittests/emi_greenmail/` | 23 | 6 | |
+| Central API (`EmiApi`) | `unittests/emi_api/` | 58 | 2 | 1 |
+| Harness | `unittests/emi_harness/` | 143 | 0 | |
+| **Total** | | **449** | **61** | **4** |
 
 **Functional tests** (`tests/functional/`, against Greenmail). Every functional test goes through the
 public API, so it drives the sender, the test broker and the reader together. The suite is therefore
@@ -342,14 +353,16 @@ counted by test family, not by tool:
 | Batches | `emi_func_batches.py` | 864 | | | 288 | 288 | 288 |
 | **Total** | | **1,019** | **5** | **9** | **406** | **311** | **288** |
 
-These counts were taken on 2026-10-26. `python -m pytest unittests --collect-only -q` (add `-m network`) and
+These counts were taken on 2026-10-26. `python -m pytest unittests --collect-only -q` (add `-m network`, or `-m docker` for the outage tests) and
 `python -m pytest tests --emi-job all --collect-only -q` recount them.
 
 ## Test Priorities and Failing Fast
 
 * **P0 and P1** are must-pass tests that prove core functionality. **P0 tests are the critical
-  tests; P1 tests are the high-priority tests.** Together they may be at most **20% of all tests**
-  and use at most **20% of the run time**.
+  tests; P1 tests are the high-priority tests.** Together they may be at most **20% of all tests**,
+  and should take at most **30% of all test time**, leaving 70% for the rest. Above 30% the quality gate
+  prints a `JOB_PRIORITY_TIME_SHARE` warning; timing never fails the gate, only a test's own time limit
+  fails that test.
 * **What each priority holds today** (1,019 tests):
 
   | Priority | Tests | What |
@@ -413,7 +426,8 @@ tests are skipped (`HARNESS_PROBE_EMAIL_NOT_RECEIVED`).
 **Not part of project status:** `ci-debug-run` (run by hand for chosen tests, a test-list file or a
 keyword), one standalone unit job per tool (`unit-emi-reader`, `unit-emi-sender`,
 `unit-emi-test-broker`, `unit-emi-greenmail`, `unit-emi-harness`) for fixing bugs, each run only when its own tool or its own unit
-tests change, and `test-validity` (weekly and by hand, see below).
+tests change, `unit-outage` (the Greenmail stop / restart tests, Ubuntu, weekly and by hand, see
+[Test Counts](#test-counts)), and `test-validity` (weekly and by hand, see below).
 
 **Test validity:** a passing test is only worth something if it would fail when the tool is broken.
 `test-validity` runs each functional test that should catch a deliberately broken tool (a **named
@@ -443,7 +457,7 @@ says how much of it is built.
 
 | File | What it contains |
 |---|---|
-| [docs/design/phase0_email_client_ambiguities.md](docs/design/phase0_email_client_ambiguities.md) | **Ambiguity register (Phase 0).** Every open question (AMB-01 to AMB-74) with its severity, the options considered, the recommendation and the author's decision; the status of open questions; **Spike Evidence**: measurements and bugs found against a live Greenmail that decisions rest on. |
+| [docs/design/phase0_email_client_ambiguities.md](docs/design/phase0_email_client_ambiguities.md) | **Ambiguity register (Phase 0).** Every open question (AMB-01 to AMB-78) with its severity, the options considered, the recommendation and the author's decision; the status of open questions; **Spike Evidence**: measurements and bugs found against a live Greenmail that decisions rest on. |
 | [docs/design/email_client_harness_design.md](docs/design/email_client_harness_design.md) | **Design document (Phase 2)**, each section citing the register rows it implements (see the next table). |
 | [docs/rtm.md](docs/rtm.md) | **Requirements traceability matrix.** Each requirement → design section → code → unit test IDs → status (Done / Partial with the gap named / Planned). |
 | [docs/keywords.md](docs/keywords.md) | **Failure keyword catalog.** Keyword grammar; every `READER_`, `SENDER_`, `TEST_BROKER_`, `GREENMAIL_`, `API_`, `HARNESS_`, `CASE_` and `JOB_` keyword with its meaning, outcome (fail / skip / skip + stop / info) and the first thing to check. A unit test fails if code uses a keyword missing here. |
@@ -488,7 +502,7 @@ AP_IMAP_EmailClient/
 │       ├── testing-standards.md       # Test naming, TestRail IDs, ASCII-only identifiers
 │       └── worktree-rules.md          # No AI commits, secrets protection, IDE ignores
 ├── .github/
-│   ├── workflows/             # CI: regression run, functional chain per OS, standalone unit jobs, debug run
+│   ├── workflows/             # CI: regression run, functional chain per OS, standalone unit jobs, outage tests, test validity, debug run
 │   └── actions/               # Shared CI steps: start Greenmail, run one harness job
 ├── docs/
 │   ├── ci_jobs.md             # CI jobs and how to run them
@@ -513,7 +527,9 @@ AP_IMAP_EmailClient/
 │   ├── emi_greenmail/
 │   ├── emi_test_broker/
 │   ├── emi_api/
-│   └── emi_harness/
+│   ├── emi_harness/
+│   ├── netfaults/             # Fault proxy and simulated IMAP / SMTP servers for the network tests
+│   └── outage/                # Greenmail stop / restart tests (marker docker, CI job unit-outage)
 ├── reports/                   # Run reports are written here (contents never committed)
 ├── conftest.py                # Loads the harness pytest plugin
 ├── .env.example               # Setting names only, never values

@@ -61,14 +61,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     if absent:
         print(f"gate failed: {len(absent)} chosen job(s) left no record of their tests", file=sys.stderr)
     holds = report.holds and not absent
-    append_step_summary(_gate_markdown(report.render(), absent, holds), os.environ)
+    warnings = [report.time_share_warning] if report.time_share_warning else []
+    append_step_summary(_gate_markdown(report.render(), absent, warnings, holds), os.environ)
     return 0 if holds else 1
 
 
-def _gate_markdown(rendered: str, absent: Sequence[str], holds: bool) -> str:
-    """The gate's step summary section: verdict, absent jobs and the report as printed."""
+def _gate_markdown(rendered: str, absent: Sequence[str], warnings: Sequence[str], holds: bool) -> str:
+    """The gate's step summary section: verdict, absent jobs, warnings and the report as printed."""
     lines = [f"### Quality gate: {'PASS' if holds else 'FAIL'}", ""]
     lines.extend(f"* {JobKeyword.RESULT_MISSING}: {line}" for line in absent)
+    lines.extend(f"* Warning: {warning}" for warning in warnings)
     lines.extend(["", "```", rendered, "```", ""])
     return "\n".join(lines) + "\n"
 

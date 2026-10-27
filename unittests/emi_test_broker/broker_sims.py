@@ -41,6 +41,8 @@ class SimMailbox:
         self.on_wait: Callable[[], None] | None = None
         self.waits: list[dict[str, Any]] = []
         self.closed = 0
+        self.inventory: dict[str, Any] | None = {"address": "qa@example.com", "match_fields": ["to"],
+                                                 "before": {"total_messages": 3}, "after": {"total_messages": 4}}
 
     @property
     def access_matrix(self) -> list[dict[str, Any]]:

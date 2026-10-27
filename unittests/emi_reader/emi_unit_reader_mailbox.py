@@ -3,6 +3,7 @@
 """Unit tests: waiting for a test's email (design §5.4, §5.5) against a simulated IMAP server."""
 
 import random
+from email.message import EmailMessage
 
 import pytest
 
@@ -16,7 +17,9 @@ from emi_reader import (
     ReaderCaseKeyword,
     ReaderKeyword,
     WaitOptions,
+    parse_email,
 )
+from emi_reader.inventory import ACTIVATION, INVITATION, NO_LINKS, UNCLASSIFIED, classify
 from unittests.emi_reader.reader_sims import SimImap, make_email
 from unittests.sims import SimClock
 
@@ -172,6 +175,50 @@ class TestEMIReaderWait:
         mailbox = _mailbox(server, clock)
         assert [item.uid for item in mailbox.emails_to((_ADDRESS,), limit=2)] == [5, 4]
         assert not mailbox.emails_to(("nobody@example.com",))
+
+
+class TestEMIReaderInventory:
+    """The mailbox inventory each wait takes on the way (design §5.8, AMB-76)."""
+
+    def EMI_READER_UNIT_100123_classify_sorts_emails_by_link(self) -> None:
+        """The first known CTA names the category; other links are unclassified, none at all is no_links."""
+        plain = EmailMessage()
+        plain["To"] = _ADDRESS
+        plain.set_content("Hello, nothing to click here.\n")
+        emails = {ACTIVATION: make_email(to_addr=_ADDRESS),
+                  INVITATION: make_email(to_addr=_ADDRESS, label="Accept invitation", path="/invite/accept"),
+                  UNCLASSIFIED: make_email(to_addr=_ADDRESS, label="Read more", path="/news"),
+                  NO_LINKS: plain.as_bytes()}
+        assert {name: classify(parse_email(raw)) for name, raw in emails.items()} == {
+            name: name for name in emails}
+
+    def EMI_READER_UNIT_100124_wait_records_before_and_after(self) -> None:
+        """Before: folder totals and the emails already at the address; after: totals and all it saw."""
+        clock = SimClock()
+        server = SimImap(clock)
+        server.deliver("INBOX", make_email(to_addr=_ADDRESS, label="Accept invitation", path="/invite/accept"))
+        server.deliver("INBOX", make_email(to_addr="qa+other@example.com"))
+        server.arrivals.append((3.0, "INBOX", make_email(to_addr=_ADDRESS)))
+        mailbox = _mailbox(server, clock)
+        mailbox.wait_for_link(_ADDRESS, Cta.ACTIVATE_ACCOUNT, timeout=20.0)
+        inventory = mailbox.inventory
+        assert inventory is not None and inventory["address"] == _ADDRESS and inventory["match_fields"] == ["to"]
+        assert inventory["before"]["folders"] == {"INBOX": {"messages": 2, "uidnext": 3}}
+        assert inventory["before"]["categories"] == {ACTIVATION: 0, INVITATION: 1, NO_LINKS: 0, UNCLASSIFIED: 0}
+        assert inventory["after"]["total_messages"] == 3
+        assert inventory["after"]["categories"] == {ACTIVATION: 1, INVITATION: 1, NO_LINKS: 0, UNCLASSIFIED: 0}
+        assert server.calls.count("fetch_messages") == 2  # no fetch beyond the wait's own
+
+    def EMI_READER_UNIT_100125_failed_wait_carries_the_inventory(self) -> None:
+        """A wait that gives up has the inventory in its error details, and the mailbox keeps it."""
+        clock = SimClock()
+        server = SimImap(clock)
+        server.deliver("INBOX", make_email(to_addr=_ADDRESS, label="Read more", path="/news"))
+        mailbox = _mailbox(server, clock)
+        with pytest.raises(EmailWaitError) as caught:
+            mailbox.wait_for_link(_ADDRESS, Cta.ACTIVATE_ACCOUNT, timeout=6.0)
+        inventory = caught.value.details["inventory"]
+        assert inventory == mailbox.inventory and inventory["after"]["categories"][UNCLASSIFIED] == 1
 
 
 class TestEMIReaderRecipientFields:

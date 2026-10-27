@@ -103,6 +103,21 @@ class TestEMIApiInprocess:
         api.reader.wait_for_emails(run.address())
         assert [wait["settle_window"] for wait in mailboxes.built[0].waits] == [0.0, None]
 
+    def EMI_API_UNIT_300063_observers_see_each_wait_inventory(self, tmp_path: Path) -> None:
+        """After every wait the observers get its inventory: from the answer, or from a failed wait's error."""
+        api, mailboxes, _sender = _inprocess(tmp_path)
+        seen: list[tuple[str, Any]] = []
+        api.observe(lambda name, data: seen.append((name, data)))
+        address = api.start_run("400001").address()
+        api.reader.wait_for_link(address, Cta.ACTIVATE_ACCOUNT)
+        api.reader.wait_for_emails(address)
+        mailboxes.built[0].error = EmailWaitError("none", ReaderCaseKeyword.EMAIL_NOT_RECEIVED,
+                                                  details={"inventory": {"address": "from-error"}})
+        with pytest.raises(EmailWaitError):
+            api.reader.wait_for_link(address, Cta.ACTIVATE_ACCOUNT)
+        assert [name for name, _data in seen] == ["inventory"] * 3
+        assert seen[0][1] == mailboxes.built[0].inventory and seen[2][1] == {"address": "from-error"}
+
     def EMI_API_UNIT_300041_wait_for_link_default_timeout(self, tmp_path: Path) -> None:
         """Waits use the settings' wait timeout unless given one."""
         api, mailboxes, _sender = _inprocess(tmp_path)
@@ -177,14 +192,17 @@ class TestEMIApiService:
 
     def EMI_API_UNIT_300051_send_and_wait_over_http(
             self, served: tuple[BrokerSettings, BrokerService, SimMailboxes]) -> None:
-        """Send and wait round-trip through the broker."""
+        """Send and wait round-trip through the broker; the wait's inventory reaches the observers."""
         settings, _service, _mailboxes = served
         client = BrokerClient(settings, spawner=lambda _settings: None)
         with EmiApi(EmiSettings(broker=settings), run_id=_RUN, backend=client,
                     greenmail=SimGreenmailReadiness()) as api:  # type: ignore[arg-type]
             run = api.start_run("400001")
             assert api.sender.send("activation", address=run.address())[0].link == LINK
+            seen: list[tuple[str, Any]] = []
+            api.observe(lambda name, data: seen.append((name, data)))
             assert api.reader.wait_for_link(run.address(), Cta.ACTIVATE_ACCOUNT, timeout=5.0) == LINK
+            assert seen == [("inventory", client.last_inventory)] and seen[0][1]["address"]  # crossed HTTP
             assert api.health().ready
 
     def EMI_API_UNIT_300052_typed_error_over_http(

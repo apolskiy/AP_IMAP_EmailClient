@@ -1,7 +1,8 @@
 # SPDX-FileCopyrightText: 2026 Aleksandr Polskiy
 # SPDX-License-Identifier: Apache-2.0
 # Standalone unit jobs, one per tool (design §12): outside project status, never blocking.
-# Each runs when its own tool folder or unit-test folder changed, or by hand.
+# Each runs when its own tool folder or unit-test folder changed, or by hand; a change to
+# unittests/netfaults/ runs the reader and sender jobs.
 name: unit-standalone
 
 # Markdown never triggers a run, even inside a tool folder (the last pattern).
@@ -18,6 +19,7 @@ on:
       - "unittests/emi_test_broker/**"
       - "unittests/emi_greenmail/**"
       - "unittests/emi_harness/**"
+      - "unittests/netfaults/**"
       - "!**/*.md"
   pull_request:
     branches: [main]
@@ -32,6 +34,7 @@ on:
       - "unittests/emi_test_broker/**"
       - "unittests/emi_greenmail/**"
       - "unittests/emi_harness/**"
+      - "unittests/netfaults/**"
       - "!**/*.md"
   workflow_dispatch:
     inputs:
@@ -81,6 +84,8 @@ jobs:
             for tool in $all; do
               if echo "$changed" | grep -qE "^(unittests/)?$tool/"; then picked="$picked $tool"; fi
             done
+            # The fault proxy and simulated servers (design §13.2) serve the reader and sender tests.
+            if echo "$changed" | grep -qE "^unittests/netfaults/"; then picked="$picked emi_reader emi_sender"; fi
           fi
           echo "tools=$picked" >> "$GITHUB_OUTPUT"
           echo "tools to test:$picked"

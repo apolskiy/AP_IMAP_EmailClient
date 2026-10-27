@@ -5,8 +5,8 @@ SPDX-License-Identifier: Apache-2.0
 # CI Jobs: What Runs, When, and How
 
 > Workflows: `.github/workflows/` (`ci-regression-run.yml`, `functional-chain.yml`, `unit-standalone.yml`,
-> `unit-tool.yml`, `ci-debug-run.yml`, `test-validity.yml`). Source of decisions: `docs/design/phase0_email_client_ambiguities.md`
-> (AMB-15, AMB-26, AMB-44, AMB-48, AMB-55, AMB-56, AMB-57, AMB-64, AMB-66).
+> `unit-tool.yml`, `ci-debug-run.yml`, `test-validity.yml`, `unit-outage.yml`). Source of decisions: `docs/design/phase0_email_client_ambiguities.md`
+> (AMB-15, AMB-26, AMB-44, AMB-48, AMB-55, AMB-56, AMB-57, AMB-64, AMB-66, AMB-77).
 
 ## When CI runs
 
@@ -52,7 +52,7 @@ first gets the P0 and P1 results.
 | # | Job | Runs on | Blocking | What it does |
 |---|---|---|---|---|
 | 1 | `lint` | Ubuntu | **Yes** | `pylint --rcfile=.pylintrc` across all modules; must score **10.00/10**. |
-| 2 | `unit` | Windows + Ubuntu | **Yes** (mandatory gate) | Every unit-test folder: `unittests/emi_reader/`, `unittests/emi_sender/`, `unittests/emi_test_broker/`, `unittests/emi_greenmail/`, `unittests/emi_harness/`, `unittests/emi_api/`. All must pass; otherwise no functional job starts. |
+| 2 | `unit` | Windows + Ubuntu | **Yes** (mandatory gate) | Every unit-test folder: `unittests/emi_reader/`, `unittests/emi_sender/`, `unittests/emi_test_broker/`, `unittests/emi_greenmail/`, `unittests/emi_harness/`, `unittests/emi_api/`, with the fault-proxy network tests. All must pass; otherwise no functional job starts. The outage tests (`docker` marker) are left out; they run in `unit-outage`. |
 | 3 | `functional-p0` | Windows + Ubuntu (see below) | **Yes** | Starts Greenmail and `emi_test_broker`, then runs the P0 (critical) tests. **100%** must pass; a skip is not a pass. **Any P0 failure is a critical failure** (`JOB_CRITICAL_FUNCTIONAL_FAILURE`): the job fails but finishes its other tests, P1 and P2–P4 still run, and only the failed test's dependents are skipped. |
 | 4 | `functional-p1` | same as P0 | **Yes** | P1 (high-priority) tests, after P0. **100%** must pass; failures are isolated unless the job aborts. |
 | 5 | `functional-p2`, `functional-p3`, `functional-p4` | same as P0 | **Yes** (fail only on an abort) | The P2, P3 and P4 tests, three jobs side by side after P1. Together **≥ 85%** must pass; since that holds for the three together, `quality-gate` measures it, and each job fails only when it aborts. Each job gets the P0 and P1 results first; the three do not see each other's, so a P3 or P4 test whose P2 parent failed runs and fails instead of being skipped (accepted for the speed). |
@@ -81,12 +81,13 @@ arrives in a folder the reader can open. If not, the job stops at once and every
 | Job | When | What it is for |
 |---|---|---|
 | `ci-debug-run` | On demand (GitHub *Actions → Run workflow*), with a test list, a test-list file, or a keyword | Custom ad-hoc runs while developing or debugging tests. Its report includes the `emi_test_broker` log for the run's time window and all port-open failures of that day. |
-| `unit-emi-reader` | Automatically when `emi_reader/` or `unittests/emi_reader/` changes; also by hand | Reader library unit tests on their own, to iron out bugs. Failures are reported, never block. |
-| `unit-emi-sender` | Automatically when `emi_sender/` or `unittests/emi_sender/` changes; also by hand | Sender unit tests on their own. Never block. |
+| `unit-emi-reader` | Automatically when `emi_reader/`, `unittests/emi_reader/` or `unittests/netfaults/` changes; also by hand | Reader library unit tests on their own, to iron out bugs. Failures are reported, never block. |
+| `unit-emi-sender` | Automatically when `emi_sender/`, `unittests/emi_sender/` or `unittests/netfaults/` changes; also by hand | Sender unit tests on their own. Never block. |
 | `unit-emi-test-broker` | Automatically when `emi_test_broker/` or `unittests/emi_test_broker/` changes; also by hand | Test broker unit tests on their own. Never block. |
 | `unit-emi-greenmail` | Automatically when `emi_greenmail/` or `unittests/emi_greenmail/` changes; also by hand | Greenmail client unit tests on their own. Never block. |
 | `unit-emi-harness` | Automatically when `emi_harness/` or `unittests/emi_harness/` changes; also by hand | Harness unit tests on their own. Never block. |
 | `test-validity` | Weekly (Monday 03:00 UTC: every named fault, and P0 and P1 repeated 3 times); by hand with a choice of check, fault, job to repeat and repeats | Proves the functional tests fail when a tool is broken (named faults) and pass when it works (repeat runs, timing margins); design §13.4. Ubuntu. Never blocks. |
+| `unit-outage` | Weekly (Monday 04:00 UTC), automatically when `unittests/outage/` changes; also by hand | Stops and restarts the job's own Greenmail container under the reader, the sender and the API, and checks each reports the outage with the right keyword and recovers (design §13.2, layer 3). Ubuntu only. Never blocks. |
 
 The standalone unit jobs run on Windows and Ubuntu. A manual run of `unit-standalone` offers one tool or
 all of them.
@@ -121,5 +122,6 @@ Run these from the repository root after the Greenmail setup in the README. They
 | `quality-gate` | `python -m emi_harness.gate <ubuntu reports> <windows reports> --expect P0 ... --expect P4` (one `--expect` per chosen job) |
 | `ci-debug-run` | `python -m emi_harness.cli --test <name>` / `--file <list.txt>` / `--keyword <KEYWORD>` |
 | `test-validity` | `python -m emi_harness.validity faults [--fault <name>]`; `python -m emi_harness.validity stability --priority P1 --repeat 3` |
+| `unit-outage` | `python -m pytest unittests/outage -m docker` (stops and restarts the `greenmail_server` container, or the one named by `EMI_GREENMAIL_CONTAINER`, which empties its mailbox; never next to a functional run) |
 
 `emi_test_broker` starts automatically on the first test that needs it (port 8025 by default).

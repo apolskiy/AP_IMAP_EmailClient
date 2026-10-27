@@ -17,8 +17,8 @@ primary and secondary keywords; ``service`` and ``inprocess`` mode raise the sam
 import json
 import os
 import threading
-from collections.abc import Callable, Mapping
-from contextlib import ExitStack
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from types import TracebackType
 from typing import Any
@@ -201,15 +201,17 @@ class SenderApi:
 class ReaderApi:
     """``api.reader``: waits for a test's email (design §5)."""
 
-    def __init__(self, backend: MailBackend, default_timeout: float) -> None:
+    def __init__(self, backend: MailBackend, default_timeout: float, observers: _Observers | None = None) -> None:
         """Wrap the backend.
 
         Args:
             backend: Service or in-process backend.
             default_timeout: Seconds a wait takes when the caller gives none.
+            observers: Told about every wait's mailbox inventory (``"inventory"``, its JSON), success or failure.
         """
         self._backend = backend
         self._default_timeout = default_timeout
+        self._observers = observers or _Observers()
 
     def wait_for_link(  # pylint: disable=too-many-arguments
         self, address: str, cta: Cta, timeout: float | None = None, *, test_id: str | None = None,
@@ -229,8 +231,9 @@ class ReaderApi:
         Returns:
             The CTA link.
         """
-        return self._backend.wait_for_link(address, cta, timeout=timeout or self._default_timeout,
-                                           test_id=test_id, run_id=run_id, match_fields=match_fields)
+        with self._inventory_observed():
+            return self._backend.wait_for_link(address, cta, timeout=timeout or self._default_timeout,
+                                               test_id=test_id, run_id=run_id, match_fields=match_fields)
 
     def wait_for_emails(  # pylint: disable=too-many-arguments
         self, address: str, cta: Cta | None = None, count: int = 1, timeout: float | None = None, *,
@@ -253,10 +256,11 @@ class ReaderApi:
         Returns:
             The emails, oldest first.
         """
-        return self._backend.wait_for_emails(address, cta=cta, count=count,
-                                             timeout=timeout or self._default_timeout, test_id=test_id,
-                                             run_id=run_id, match_fields=match_fields,
-                                             settle_window=settle_window)
+        with self._inventory_observed():
+            return self._backend.wait_for_emails(address, cta=cta, count=count,
+                                                 timeout=timeout or self._default_timeout, test_id=test_id,
+                                                 run_id=run_id, match_fields=match_fields,
+                                                 settle_window=settle_window)
 
     def emails_to(self, addresses: tuple[str, ...], limit: int = 30) -> list[RawEmail]:
         """Every email at the addresses, matched or not, newest first; report evidence, never pass/fail.
@@ -269,6 +273,26 @@ class ReaderApi:
             The emails with their raw bytes.
         """
         return self._backend.emails_to(tuple(addresses), limit)
+
+    @contextmanager
+    def _inventory_observed(self) -> Iterator[None]:
+        """Hand the wait's inventory to the observers: from the backend on success, the error on failure.
+
+        A backend without ``last_inventory`` (a simulation) or a wait that never reached the mailbox has none,
+        and nothing is reported. Never changes the wait's result or error.
+        """
+        try:
+            yield
+        except Exception as error:
+            details = getattr(error, "details", None)
+            self._report(details.get("inventory") if isinstance(details, dict) else None)
+            raise
+        self._report(getattr(self._backend, "last_inventory", None))
+
+    def _report(self, inventory: Any) -> None:
+        """Notify the observers when there is an inventory."""
+        if isinstance(inventory, dict):
+            self._observers.notify("inventory", inventory)
 
 
 class EmiApi:  # pylint: disable=too-many-instance-attributes
@@ -304,7 +328,7 @@ class EmiApi:  # pylint: disable=too-many-instance-attributes
         self._families: dict[str, Any] = {}
         self._observers = _Observers()
         self.sender = SenderApi(self._backend, self._observers)
-        self.reader = ReaderApi(self._backend, self._settings.wait_timeout)
+        self.reader = ReaderApi(self._backend, self._settings.wait_timeout, self._observers)
 
     # --- identity --------------------------------------------------------------------------------------
 
@@ -346,7 +370,8 @@ class EmiApi:  # pylint: disable=too-many-instance-attributes
         return run
 
     def observe(self, observer: Observer) -> Callable[[], None]:
-        """Be told about evidence as calls finish: ``observer("manifest", <manifest JSON>)`` after each send.
+        """Be told about evidence as calls finish: ``observer("manifest", <manifest JSON>)`` after each send,
+        ``observer("inventory", <inventory JSON>)`` after each wait.
 
         Args:
             observer: Called with a name and JSON-ready data; must not raise.

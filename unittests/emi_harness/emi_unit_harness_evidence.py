@@ -9,8 +9,12 @@ import pytest
 
 from emi_harness import CaseFailure, Steps
 from emi_harness.evidence import Evidence, safe_name, write_settings
+from emi_harness.inventory_log import InventoryLog
+from emi_harness.jobs import JobController
 from emi_harness.options import resolve
-from emi_harness.results import load_results
+from emi_harness.plugin import HarnessState, ItemInfo, _observer
+from emi_harness.priorities import Job
+from emi_harness.results import ResultsWriter, load_results
 from emi_reader import EmailWaitError, ReaderCaseKeyword
 
 _RUN_ID = "20261026t153012-w00-a1b2"
@@ -46,6 +50,24 @@ class TestEMIHarnessEvidence:
         plain = Evidence()
         plain.add_error(ValueError("no details"))
         assert not plain.items
+
+    def EMI_HARNESS_UNIT_200164_inventory_attached_and_logged(self, tmp_path: Path) -> None:
+        """A wait's inventory joins the running test's evidence and one line of the worker's jsonl (AMB-76)."""
+        state = HarnessState(resolved=None, error="", job=Job.P2, run_id=_RUN_ID, directory=tmp_path,
+                             controller=JobController(Job.P2, budget_sec=None, stop_dir=tmp_path),
+                             writer=ResultsWriter(tmp_path, "gw1"), inventory=InventoryLog(tmp_path, "gw1"))
+        observe = _observer(state)
+        observe("manifest", {"entries": []})  # no test running: dropped
+        state.current = ItemInfo(case_id="C400001", priority="P2")
+        observe("inventory", {"address": f"qa+c000000_{_RUN_ID}@example.com"})  # the probe's, mid-setup
+        observe("manifest", {"entries": []})
+        observe("inventory", {"address": "qa@example.com", "after": {"total_messages": 4}})
+        assert [name for name, _data in state.current.evidence.items] == ["manifest", "inventory"]
+        lines = (tmp_path / "inventory-gw1.jsonl").read_text(encoding="utf-8").splitlines()
+        records = [json.loads(line) for line in lines]
+        assert [record["test_id"] for record in records] == ["C000000", "C400001"]
+        assert records[1]["run_id"] == _RUN_ID and records[1]["after"]["total_messages"] == 4
+        assert records[1]["timestamp"].endswith("+00:00")
 
     def EMI_HARNESS_UNIT_200122_safe_names(self) -> None:
         """Node IDs become usable folder names."""

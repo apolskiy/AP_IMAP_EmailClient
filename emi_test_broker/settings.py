@@ -18,7 +18,7 @@ from emi_reader.settings import GREENMAIL_TEST_PASSWORD
 from emi_sender import SenderSettings, Transport
 from emi_sender import Security as SmtpSecurity
 
-BROKER_VERSION = "1.0.0"
+BROKER_VERSION = "1.1.0"  # 1.1.0: POST /emails (AMB-74) and the wait's "inventory" (AMB-76)
 TOKEN_HEADER = "X-EMI-Broker-Token"
 
 

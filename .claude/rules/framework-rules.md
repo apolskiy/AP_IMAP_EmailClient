@@ -40,6 +40,10 @@ reported but never turn the project status red.
 * `unit-emi-test-broker`: `emi_test_broker/` or `unittests/emi_test_broker/`
 * `unit-emi-greenmail`: `emi_greenmail/` or `unittests/emi_greenmail/`
 * `unit-emi-harness`: `emi_harness/` or `unittests/emi_harness/`
+* `unittests/netfaults/` (the fault proxy and simulated servers) starts `unit-emi-reader` and `unit-emi-sender`.
+* `unit-outage`: `unittests/outage/`, weekly and by hand, Ubuntu only. It stops and restarts its own Greenmail
+  container (marker `docker`), so the default unit run, and with it the regression's `unit` job, leaves those
+  tests out.
 
 **Overlapping runs** (when a new run starts while one is in progress):
 * Pull requests and feature-branch pushes: the older run for the **same** PR/branch is **cancelled**.

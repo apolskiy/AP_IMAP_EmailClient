@@ -11,11 +11,12 @@ from typing import Any, NoReturn
 
 from emi_reader.accessibility import FolderAccess, filter_evidence, matrix_rows, probe_account
 from emi_reader.errors import EmailWaitError, ImapConnectionError, LinkExtractionError, MailboxAccessError
+from emi_reader.inventory import CATEGORIES, Inventory, Snapshot, classify
 from emi_reader.keywords import ReaderCaseKeyword, ReaderKeyword
 from emi_reader.links import Cta, LinkExtractor
 from emi_reader.mime import ParsedEmail, parse_email
 from emi_reader.settings import ImapSettings
-from emi_reader.transport import ImaplibTransport, ImapTransport
+from emi_reader.transport import FolderStatus, ImaplibTransport, ImapTransport
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -130,6 +131,20 @@ class _WaitState:
     cursors: list[_Cursor] = field(default_factory=list)
     matches: dict[tuple[str, int], ReceivedEmail] = field(default_factory=dict)
     access_start: list[FolderAccess] = field(default_factory=list)
+    folders: dict[str, dict[str, int]] = field(default_factory=dict)
+    seen: dict[tuple[str, int], str] = field(default_factory=dict)
+    before: Snapshot | None = None
+
+    def snapshot(self) -> Snapshot:
+        """Folder totals and the categories of every email seen at the address so far (AMB-76)."""
+        counts = dict.fromkeys(CATEGORIES, 0)
+        for category in self.seen.values():
+            counts[category] += 1
+        return Snapshot({name: dict(values) for name, values in self.folders.items()}, counts)
+
+    def record_status(self, folder: str, status: FolderStatus) -> None:
+        """Keep a folder's latest totals from the wait's own ``EXAMINE``."""
+        self.folders[folder] = {"messages": status.messages, "uidnext": status.uidnext}
 
 
 @dataclass(frozen=True)
@@ -196,6 +211,7 @@ class Mailbox:
         self._extractor = LinkExtractor(mismatch_is_error=self._options.mismatch_is_error)
         self._last_access: list[FolderAccess] = []
         self._attempts: list[dict[str, Any]] = []
+        self._inventory: dict[str, Any] | None = None
 
     @property
     def access_matrix(self) -> list[dict[str, Any]]:
@@ -206,6 +222,11 @@ class Mailbox:
     def attempts(self) -> list[dict[str, Any]]:
         """Network failures retried during the latest wait."""
         return list(self._attempts)
+
+    @property
+    def inventory(self) -> dict[str, Any] | None:
+        """The latest wait's mailbox inventory as JSON (design §5.8), or None before any wait got started."""
+        return self._inventory
 
     def close(self) -> None:
         """Close the connection; safe to call more than once."""
@@ -268,7 +289,7 @@ class Mailbox:
                 f"{len(found)} matching emails for {target.address}, expected {count}",
                 ReaderCaseKeyword.EMAIL_COUNT_EXCEEDED,
                 details={"address": target.address, "expected": count, "found": len(found),
-                         "message_ids": [item.message_id for item in found]},
+                         "message_ids": [item.message_id for item in found], "inventory": self._inventory},
             )
         return found
 
@@ -360,6 +381,7 @@ class Mailbox:
         state: _WaitState | None = None
         last_error: ImapConnectionError | None = None
         self._attempts = []
+        self._inventory = None
         while True:
             try:
                 state = self._start(target) if state is None else state
@@ -369,6 +391,9 @@ class Mailbox:
                 if not error.retryable:
                     raise
                 last_error = self._record_retry(error)
+            if state is not None and state.before is not None:
+                self._inventory = Inventory(target.address, target.match_fields, state.before,
+                                            state.snapshot()).to_json()
             found = sorted(state.matches.values(), key=lambda item: (item.folder, item.uid)) if state else []
             now = self._clock()
             if satisfied(found):
@@ -422,7 +447,7 @@ class Mailbox:
             f"{len(found)} matching email(s) for {target.address} before the deadline",
             ReaderCaseKeyword.EMAIL_NOT_RECEIVED,
             details={"address": target.address, "cta": target.cta.label if target.cta else None,
-                     "found": len(found), "folders": self.access_matrix},
+                     "found": len(found), "folders": self.access_matrix, "inventory": self._inventory},
         )
 
     def _raise_if_filtered(self, state: _WaitState) -> None:
@@ -458,9 +483,11 @@ class Mailbox:
         state = _WaitState(address=target.address, access_start=access)
         for entry in readable:
             status = transport.examine(entry.folder)
+            state.record_status(entry.folder, status)
             cursor = _Cursor(entry.folder, status.uidvalidity, status.uidnext)
             state.cursors.append(cursor)
             self._consider(state, target, cursor.folder, self._search_address(transport, target))
+        state.before = state.snapshot()
         return state
 
     def _search_address(self, transport: ImapTransport, target: _Target, since_uid: int = 0) -> list[int]:
@@ -481,6 +508,7 @@ class Mailbox:
         transport = self._connection()
         for cursor in state.cursors:
             status = transport.examine(cursor.folder)
+            state.record_status(cursor.folder, status)
             if status.uidvalidity != cursor.uidvalidity:
                 _LOGGER.info("%s: %s %d -> %d; searching again", ReaderKeyword.IMAP_UIDVALIDITY_CHANGED,
                              cursor.folder, cursor.uidvalidity, status.uidvalidity)
@@ -503,6 +531,7 @@ class Mailbox:
             return
         for uid, raw in sorted(self._connection().fetch_messages(candidates).items()):
             email = parse_email(raw)
+            state.seen[(folder, uid)] = classify(email)  # the inventory, from what the wait fetches anyway
             if not self._header_match(email, target):
                 continue
             match = self._full_match(email, uid, folder, target)

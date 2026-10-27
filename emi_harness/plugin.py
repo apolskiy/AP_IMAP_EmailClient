@@ -15,19 +15,21 @@ case="C400001")``.
 import json
 import os
 import time
-from collections.abc import Generator, Iterator
+from collections.abc import Callable, Generator, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from emi_api import ClientMode, EmiApi, EmiRun, RunId, default_backend, worker_number
+from emi_api import ClientMode, EmiApi, EmiRun, RunId, default_backend, marker_for, worker_number
+from emi_api import case_id as testrail_case
 from emi_harness.allure_report import priority_marks, record_outcome, write_categories
 from emi_harness.dependencies import DependencyTracker, dependency_groups, misplaced_parents, order_tests
 from emi_harness.evidence import Attacher, Evidence, FileAttacher, write_settings
 from emi_harness.failure_evidence import collect
 from emi_harness.faults import NO_FAULT, apply_fault
+from emi_harness.inventory_log import InventoryLog
 from emi_harness.jobs import JobController, StopDecision
 from emi_harness.keywords import CaseKeyword, HarnessKeyword
 from emi_harness.options import Resolved, add_pytest_options, cli_values, read_dotenv, resolve
@@ -78,6 +80,7 @@ class HarnessState:  # pylint: disable=too-many-instance-attributes
     current: ItemInfo | None = None
     counts_asserts: bool = False
     allure: bool = False
+    inventory: InventoryLog = field(default_factory=lambda: InventoryLog(Path("reports"), "main"))
 
 
 _STATE = pytest.StashKey[HarnessState]()
@@ -138,7 +141,7 @@ def pytest_configure(config: pytest.Config) -> None:
                          writer=ResultsWriter(directory, worker), hook=allure_hooks[0], attacher=allure_hooks[1],
                          file_attacher=allure_hooks[2],
                          counts_asserts=bool(config.getini("enable_assertion_pass_hook")),
-                         allure=allure_hooks[0] is not None)
+                         allure=allure_hooks[0] is not None, inventory=InventoryLog(directory, worker))
     config.stash[_STATE] = state
     if state.allure:
         write_categories(Path(config.option.allure_report_dir))
@@ -318,12 +321,33 @@ def _api(pytestconfig: pytest.Config) -> Iterator[EmiApi]:
     settings = state.resolved.emi_settings()
     backend = apply_fault(state.resolved["fault"], default_backend(settings))  # unchanged unless --emi-fault
     api = EmiApi(settings, run_id=state.run_id, backend=backend)
-    api.observe(lambda name, data: state.current.evidence.add(name, data) if state.current else None)
+    api.observe(_observer(state))
     try:
         session_setup(api, probe=state.resolved["probe"], probe_timeout=state.resolved["probe_timeout"])
         yield api
     finally:
         api.close()
+
+
+def _observer(state: HarnessState) -> Callable[[str, Any], None]:
+    """Attach the API's evidence to the running test; also log each wait's inventory (AMB-76).
+
+    An inventory belongs to the test its address names, so the session probe's wait, which runs while the
+    first test is being set up, is logged as the probe's and not attached to that test.
+    """
+
+    def _observe(name: str, data: Any) -> None:
+        current = state.current
+        if name == "inventory" and isinstance(data, dict):
+            marker = marker_for(str(data.get("address", "")))
+            owner = testrail_case(marker.test_id) if marker else (current.case_id if current else "")
+            if owner:
+                state.inventory.append(state.run_id, owner, data)
+            if current is None or owner != current.case_id:
+                return
+        if current is not None:
+            current.evidence.add(name, data)
+    return _observe
 
 
 @pytest.fixture(name="steps")

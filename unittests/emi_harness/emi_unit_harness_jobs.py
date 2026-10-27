@@ -149,6 +149,18 @@ class TestEMIHarnessPriorities:
                                  _outcome(400001, priority="P0")])
         assert report.holds
 
+    def EMI_HARNESS_UNIT_200163_time_share_warns_never_fails(self) -> None:
+        """P0 + P1 above 30% of test time is a warning; the gate still passes; P0/P1 alone are not measured."""
+        results = [_outcome(400001, priority="P0", duration=31.0), _outcome(400100, duration=69.0)]
+        report = evaluate_gates(results)
+        assert report.holds and report.must_pass_time_share == pytest.approx(0.31)
+        assert report.time_share_warning.startswith(JobKeyword.PRIORITY_TIME_SHARE)
+        assert "WARNING JOB_PRIORITY_TIME_SHARE" in report.render() and "Result: PASS" in report.render()
+        at_ceiling = evaluate_gates([_outcome(400001, priority="P1", duration=30.0), _outcome(400100, duration=70.0)])
+        assert not at_ceiling.time_share_warning
+        alone = evaluate_gates([_outcome(400001, priority="P0", duration=50.0)])
+        assert alone.must_pass_time_share is None and "not measured" in alone.render()
+
 
 class TestEMIHarnessDependencies:
     """Dependency skipping (design §9.5)."""

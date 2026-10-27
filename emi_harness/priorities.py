@@ -24,6 +24,7 @@ from emi_harness.outcomes import TestOutcome
 PRIORITIES = ("P0", "P1", "P2", "P3", "P4")
 DEFAULT_PRIORITY = "P2"
 MUST_PASS_SHARE = 0.20
+MUST_PASS_TIME_CEILING = 0.30
 LOW_GATE = 0.85
 OVERALL_GATE = 0.95
 _NUMBER = re.compile(r"(\d+)")
@@ -222,18 +223,28 @@ class GateReport:
         checks: The gates measured, in order.
         effective_low_floor: The P2-P4 pass share the overall gate actually needs.
         keywords: Primary keyword -> count over every non-pass.
-        must_pass_time_share: Share of test time spent in P0 + P1.
+        must_pass_time_share: Share of test time spent in P0 + P1, or None when no P2-P4 result is
+            present (P0 and P1 alone are always 100%).
     """
 
     checks: tuple[GateCheck, ...]
     effective_low_floor: float
     keywords: dict[str, int] = field(default_factory=dict)
-    must_pass_time_share: float = 0.0
+    must_pass_time_share: float | None = None
 
     @property
     def holds(self) -> bool:
-        """Whether every gate holds."""
+        """Whether every gate holds (the time share is a warning, never a gate: AMB-75)."""
         return all(check.holds for check in self.checks)
+
+    @property
+    def time_share_warning(self) -> str:
+        """``JOB_PRIORITY_TIME_SHARE`` with the share when P0 + P1 took more than 30% of test time, else ""."""
+        share = self.must_pass_time_share
+        if share is None or share <= MUST_PASS_TIME_CEILING:
+            return ""
+        return (f"{JobKeyword.PRIORITY_TIME_SHARE}: P0 + P1 took {share:.1%} of test time, above the "
+                f"{MUST_PASS_TIME_CEILING:.0%} ceiling (a warning; timing never fails the gate)")
 
     def render(self) -> str:
         """The gate report as text (job log).
@@ -246,8 +257,13 @@ class GateReport:
             lines.append(f"  {'PASS' if check.holds else 'FAIL'} {check.name}: {check.passed}/{check.total} "
                          f"({check.share:.1%}, required {check.required:.0%})")
         lines.append(f"  Effective P2-P4 floor for the overall gate: {self.effective_low_floor:.1%}")
-        lines.append(f"  P0 + P1 share of test time: {self.must_pass_time_share:.1%} "
-                     f"(target <= {MUST_PASS_SHARE:.0%})")
+        if self.must_pass_time_share is None:
+            lines.append("  P0 + P1 share of test time: not measured (no P2-P4 results)")
+        else:
+            lines.append(f"  P0 + P1 share of test time: {self.must_pass_time_share:.1%} "
+                         f"(ceiling {MUST_PASS_TIME_CEILING:.0%}, a warning only)")
+        if self.time_share_warning:
+            lines.append(f"WARNING {self.time_share_warning}")
         if self.keywords:
             lines.append("Keyword summary (non-passing tests):")
             for keyword, count in sorted(self.keywords.items(), key=lambda pair: (-pair[1], pair[0])):
@@ -288,5 +304,5 @@ def evaluate_gates(outcomes: Iterable[TestOutcome]) -> GateReport:
     keywords = Counter(item.primary for item in results if not item.passed and item.primary)
     total_time = sum(item.duration for item in results)
     must_time = sum(item.duration for item in by_priority["P0"] + by_priority["P1"])
-    return GateReport(tuple(checks), max(LOW_GATE, floor), dict(keywords),
-                      must_time / total_time if total_time else 0.0)
+    share = must_time / total_time if low and total_time else None
+    return GateReport(tuple(checks), max(LOW_GATE, floor), dict(keywords), share)

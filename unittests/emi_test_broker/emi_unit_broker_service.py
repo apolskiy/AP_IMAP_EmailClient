@@ -88,6 +88,14 @@ class TestEMIBrokerSendAndWait:
         waits = mailboxes.built[0].waits
         assert waits[0]["match_fields"] == ("cc", "bcc") and waits[1]["match_fields"] is None
 
+    def EMI_TEST_BROKER_UNIT_130081_wait_returns_the_inventory(self, tmp_path: Path) -> None:
+        """Each answer carries the mailbox inventory of that wait (AMB-76); a mailbox without one gives None."""
+        service, mailboxes, *_sims = make_service(tmp_path)
+        answer = service.wait(dict(_WAIT))
+        assert answer["inventory"] == mailboxes.built[0].inventory and answer["inventory"]["address"]
+        mailboxes.built[0].inventory = None
+        assert service.wait(dict(_WAIT))["inventory"] is None
+
     def EMI_TEST_BROKER_UNIT_130014_connection_reused_between_waits(self, tmp_path: Path) -> None:
         """A pooled mailbox (open IMAP connection) serves the next wait."""
         service, mailboxes, *_sims = make_service(tmp_path)

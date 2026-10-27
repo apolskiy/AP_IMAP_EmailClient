@@ -174,6 +174,7 @@ class BrokerClient:
         self._clock = clock
         self._sleeper = sleeper
         self._token: str | None = None
+        self._local = threading.local()
 
     @property
     def settings(self) -> BrokerSettings:
@@ -297,7 +298,7 @@ class BrokerClient:
         """
         payload = {"address": address, "cta": cta_to_json(cta), "mode": "link", "timeout": timeout,
                    "test_id": test_id, "run_id": run_id, "match_fields": _fields(match_fields)}
-        return str(self._post("/wait", payload, timeout + _CALL_MARGIN_SEC)["link"])
+        return str(self._wait(payload, timeout)["link"])
 
     def wait_for_emails(  # pylint: disable=too-many-arguments
         self, address: str, *, cta: Cta | None = None, count: int = 1, timeout: float = 60.0,
@@ -323,8 +324,19 @@ class BrokerClient:
         payload = {"address": address, "cta": cta_to_json(cta), "mode": "emails", "count": count,
                    "timeout": timeout, "test_id": test_id, "run_id": run_id,
                    "match_fields": _fields(match_fields), "settle_window": settle_window}
+        return [received_from_json(item) for item in self._wait(payload, timeout)["emails"]]
+
+    @property
+    def last_inventory(self) -> dict[str, Any] | None:
+        """This thread's latest successful wait's mailbox inventory (AMB-76); a failed wait's is in its error."""
+        return getattr(self._local, "inventory", None)
+
+    def _wait(self, payload: dict[str, Any], timeout: float) -> dict[str, Any]:
+        """``POST /wait``, keeping the inventory the answer carries."""
+        self._local.inventory = None
         answer = self._post("/wait", payload, timeout + _CALL_MARGIN_SEC)
-        return [received_from_json(item) for item in answer["emails"]]
+        self._local.inventory = answer.get("inventory")
+        return answer
 
     def emails_to(self, addresses: tuple[str, ...], limit: int = 30, timeout: float = 30.0) -> list[RawEmail]:
         """Every email at a failed test's addresses, for its report (AMB-74).

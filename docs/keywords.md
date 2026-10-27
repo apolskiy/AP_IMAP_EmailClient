@@ -89,7 +89,7 @@ remaining tests skipped. **info**: secondary keyword only; it never decides the 
 | `GREENMAIL_API_REQUEST_FAILED` | A management call (users, purge, configuration) was answered with an error | fail (setup or tool) | The HTTP status and reason in the message |
 | `API_ADDRESS_INVALID` | Test ID not a TestRail case ID (`C` + at least 6 digits; `400001` is accepted), run ID not ASCII `[a-z0-9_-]`, local part over 64 characters, or a malformed run ID | skip (condition error) | Test ID and run ID |
 | `HARNESS_PROBE_EMAIL_NOT_RECEIVED` | Setup probe email did not arrive in a readable folder | skip + stop | Delivery routing, filters, accessibility matrix |
-| `HARNESS_DOCKER_UNAVAILABLE` | Real-outage test needs Docker, not available | skip | Run locally or with `ci-debug-run` on Ubuntu |
+| `HARNESS_DOCKER_UNAVAILABLE` | Real-outage test needs Docker and a running Greenmail container, not available | skip | Start the container (`EMI_GREENMAIL_CONTAINER`, default `greenmail_server`) or run `unit-outage` on Ubuntu |
 | `HARNESS_DUPLICATE_TEST_ID` | Two tests share one TestRail ID (functional: per case, unit: per function) | collection fails | The test names listed in the message |
 | `HARNESS_DEPENDENCY_ORDER` | A test depends on a parent of a lower priority (e.g. a P1 test on a P2 test), so the parent would run after it | collection fails | Give the parent the child's priority or a higher one; a P1 parent moved to P2 by the 20% rule counts as P2 |
 
@@ -122,5 +122,6 @@ remaining tests skipped. **info**: secondary keyword only; it never decides the 
 | `JOB_CIRCUIT_BREAKER_OPEN` | 5 failures in a row with the same primary keyword (P2–P4, debug) | abort; remaining tests skipped |
 | `JOB_PRIORITY_DOWNGRADED` | A P1 test moved to P2 for this run (P0 + P1 over 20%) | info |
 | `JOB_PRIORITY_P0_OVERFLOW` | P0 alone over 20% of tests | collection fails |
+| `JOB_PRIORITY_TIME_SHARE` | P0 + P1 took more than 30% of all test time (measured by the quality gate when P2-P4 results are present, AMB-75) | info (warning in the gate report and on the run page; never fails) |
 | `JOB_TIMEOUT` | The job exceeded its time budget | abort; remaining tests skipped |
 | `JOB_RESULT_MISSING` | A job selected a test but wrote no result for it (a crashed worker, a runner killed at its timeout), or a job chosen to run left no `collection.json` (it never started or failed before selecting tests) | the quality gate counts the test as not passed (skip), so lost results cannot raise the pass share; a chosen job without a collection fails the gate |

@@ -235,11 +235,32 @@ its `sub` equals the address (case-insensitive) and fails with `CASE_LINK_RECIPI
 Works for sender-generated and real-application mail; used by duplicate-delivery tests.
 
 ### 5.8 Mailbox inventory (AMB-40)
-On connect and after each wait: whole-mailbox totals (`STATUS MESSAGES UIDNEXT`) and, **for the test's own
-addresses only**, counts per category (`no_links`, `activation`, `invitation`, `unclassified`), before and
-after. Always produced, attached to the report, and written as JSON records (run ID, test ID, timestamp,
-totals, per-category before/after) in the run directory for cross-run statistical / ML analysis.
-**Never** used for pass/fail.
+Per wait: whole-folder totals (message count and `UIDNEXT`) and, **for the test's own address only**,
+counts per category (`no_links`, `activation`, `invitation`, `unclassified`), before and after. Always
+produced, attached to the report, and written as JSON records (run ID, test ID, timestamp, totals,
+per-category before/after) in the run directory for cross-run statistical / ML analysis. **Never** used
+for pass/fail.
+
+* **Taken from the wait itself** (AMB-76), at no extra IMAP cost: a separate lookup costs about 0.7 s per
+  fetch at 5,000 messages (AMB-71). The wait already opens each folder with `EXAMINE` (totals) and fetches
+  every email at the address on its recipient fields, so it classifies each email it fetches.
+  * **Before**: the totals of each readable folder when the wait starts, and the categories of the emails
+    already at the address.
+  * **After**: the totals when the wait ends, and the categories of every email it saw.
+  * **Category**: the first CTA found (`activation` for "Activate account", `invitation` for "Accept
+    invitation"); no link at all is `no_links`; links but no known CTA, or an email that cannot be
+    decoded, is `unclassified`.
+* `Mailbox.inventory` holds the latest wait's record, success or failure; a failed wait's error carries
+  it in its details. The broker returns it with each wait (`"inventory"`, read before the connection goes
+  back to the pool, broker version 1.1.0), `EmiApi` hands it to its observers (`"inventory"`; from the
+  answer, or from a failed wait's error), and the harness attaches it to the test and appends it to
+  `<job dir>/inventory-<worker>.jsonl` (`emi_harness/inventory_log.py`), one line per wait:
+  `{run_id, test_id, timestamp, address, match_fields, before, after}`, each snapshot with `folders`
+  (`messages`, `uidnext`), `total_messages` and `categories`.
+* **Owner**: the test the address names. The session probe's wait runs while the first test is being set
+  up, so it is logged as `C000000` and not attached to that test.
+* No separate lookup: `GET /inventory` and `api.reader.inventory` are not built, since each would cost
+  the fetches AMB-76 avoids.
 
 ## 6. `emi_sender`: the Sender (AMB-06, AMB-33 to AMB-37, AMB-39, AMB-45, AMB-51, AMB-61)
 
@@ -355,7 +376,8 @@ printed as JSON by the CLI, saved in the run directory. Exit codes and keywords:
     `DETACHED_PROCESS` opened a visible console window, because a venv's `python.exe` is a launcher that
     starts the real interpreter, and a detached launcher's child gets a new console. With
     `CREATE_NO_WINDOW` both processes share one hidden console (Spike Evidence).
-  * `GET /inventory` answers 501 until the reader's inventory (§5.8) exists. `--older-than` takes days
+  * `GET /inventory` answers 501: the inventory comes with each `/wait` answer instead (§5.8, AMB-76).
+    `--older-than` takes days
     (IMAP `BEFORE` is day-granular).
 
 ## 8. `emi_greenmail` and `emi_api`
@@ -390,7 +412,6 @@ api.sender.send(kind, address, count, ...) # -> Manifest
 api.reader.wait_for_link(address, cta, timeout=None)                 # -> str
 api.reader.wait_for_emails(address, cta=None, count=1, timeout=None) # -> list[ReceivedEmail]
 api.reader.emails_to(addresses, limit=30)  # -> list[RawEmail], newest first (report evidence, AMB-74)
-api.reader.inventory(addresses)            # -> Inventory (§5.8)
 api.greenmail.ready()                      # -> bool
 ```
 `ReceivedEmail`: UID, folder, Message-ID, recipient, subject, arrival time, kind, links, marker.
@@ -414,10 +435,10 @@ secondary keywords. New test families register through a small plugin registry w
   carries its keywords, so a PRE step can verify `.ready` and report `.keywords`.
 * `start_run` takes the test ID in any accepted form and stores the TestRail case ID (`run.test_id ==
   "C400001"`). The reader compares marker test IDs in that form too, so `test_id="400001"` still matches.
-* `api.reader.inventory` waits for §5.8 (RTM R-RD-11).
 * **Observers**: `api.observe(callback)` is told `("manifest", <manifest JSON>)` after each send and
-  returns a call that removes the callback. The harness uses it to attach manifests to the running test's
-  report (§9.8) without the tests doing anything.
+  `("inventory", <inventory JSON>)` after each wait (§5.8), and returns a call that removes the callback.
+  The harness uses it to attach both to the running test's report (§9.8) without the tests doing
+  anything.
 
 ## 9. `emi_harness`: Runner, Steps and Gates
 
@@ -484,7 +505,11 @@ or `HARNESS_PROBE_EMAIL_NOT_RECEIVED` (+ `READER_MAILBOX_FILTERED_TO_INACCESSIBL
 test SKIP; job stops.
 
 ### 9.7 Priorities and downgrades (AMB-48, AMB-58)
-* P0 = critical, P1 = high, P2–P4 = standard / low. P0 + P1 at most **20% of tests** and **20% of time**.
+* P0 = critical, P1 = high, P2–P4 = standard / low. P0 + P1 at most **20% of tests** (enforced below).
+* **Time share** (AMB-75): P0 + P1 should take at most **30% of all test time**, leaving 70% for the
+  rest. The gate measures it when P2-P4 results are present (P0 and P1 alone are always 100%) and, above
+  30%, prints `JOB_PRIORITY_TIME_SHARE` in the job log and on the run page. It never fails the gate:
+  timing fails a test only through that test's own time limit.
 * Overflow: at collection the harness moves the excess **P1** tests to P2 for that run (declared `rank`
   first, then highest test ID), logs `JOB_PRIORITY_DOWNGRADED` per move and suggests a permanent re-label.
   P0 is never moved; P0 alone above 20% → `JOB_PRIORITY_P0_OVERFLOW`.
@@ -534,7 +559,8 @@ history. Output in `reports/<run id>/`.
     `NN_broker_log.log`. In-process mode has no broker; the evidence item says so instead.
   * The `.eml` and `.log` files are listed in the results line like the JSON items, shown in the HTML
     report (an email's first 20 KB as text), and attached to Allure as `message/rfc822` and `text/plain`.
-* The mailbox inventory (§5.8) is not yet attached (RTM R-RD-11).
+* **Mailbox inventory** (§5.8, AMB-76): every wait's inventory is attached as `NN_inventory.json`, passed
+  or not, and appended to `<job dir>/inventory-<worker>.jsonl`.
 * **Allure views** (AMB-69, `emi_harness/allure_report.py`). Allure's Categories tab classifies only failed,
   broken and skipped results, by status and a regex on the message, and never shows passed tests; it
   cannot read labels. So:
@@ -648,7 +674,11 @@ User-facing details: `docs/ci_jobs.md`. Rule source: `.claude/rules/framework-ru
   for the run window and that day's port failures; can select the `docker` marker for layer-3 fault
   tests) and one standalone unit job per tool (`unit-emi-reader`, `unit-emi-sender`,
   `unit-emi-test-broker`, `unit-emi-greenmail`, `unit-emi-harness`), each triggered by its own tool or
-  unit-test folder and by hand; they never block.
+  unit-test folder and by hand (a change to `unittests/netfaults/` starts the reader and sender jobs);
+  they never block.
+* **Outage tests** (AMB-77): `unit-outage.yml` runs `unittests/outage/` (`-m docker`) on Ubuntu against
+  its own Greenmail container, by hand and weekly, and automatically when `unittests/outage/` changes. It
+  never blocks and is never part of `ci-regression-run`, whose `unit` job leaves the `docker` tests out.
 * **Overlapping runs**: PR / feature-branch runs cancel the older run of the same branch; `main` and
   manual runs are never cancelled and may run in parallel; a job using a shared real mailbox queues.
 * **Test validity** (§13.4, AMB-64): `test-validity` (manual and weekly, Ubuntu) runs the named-fault
@@ -656,7 +686,7 @@ User-facing details: `docs/ci_jobs.md`. Rule source: `.claude/rules/framework-ru
   full-suite stability run would take hours every week); by hand any fault, job and repeat count.
 * **Workflow files**: `.github/workflows/ci-regression-run.yml` (project status), `functional-chain.yml` (the P0 → P1 →
   P2 / P3 / P4 chain, called once per OS), `ci-debug-run.yml`, `unit-standalone.yml` (a `changes` job lists the
-  tools whose folders changed; each tool's job calls `unit-tool.yml`), `test-validity.yml`. Shared steps
+  tools whose folders changed; each tool's job calls `unit-tool.yml`), `test-validity.yml`, `unit-outage.yml`. Shared steps
   are composite actions: `.github/actions/harness-job` (Python, requirements, Greenmail, broker, one
   harness command, uploads; its exit code tells the chain an abort from failures) and `start-greenmail`.
 * **Allure on GitHub Pages**: after a run on `main`, `quality-gate` builds one Allure report from both OSes
@@ -684,6 +714,48 @@ downgrades, circuit breaker, dependency cascade, keyword-catalog completeness, d
    10053/10054 and Linux `BrokenPipe` / `ConnectionReset`), `refuse`. Runs in CI (`unit`, both OSes).
 3. **Real outage**: stop / restart the Greenmail container mid-test, marker `docker`; local, or CI only
    when started by hand. Skipped elsewhere with `HARNESS_DOCKER_UNAVAILABLE`.
+
+**Where each layer lives** (AMB-77). Tests that need a proxy run against the proxy; tests that need
+Greenmail run against Greenmail.
+* **Layer 2**: `unittests/netfaults/` holds the proxy (`fault_proxy.py`) and the simulated servers
+  (`sim_imap_server.py`, `sim_smtp_server.py`, sharing `sim_server.py`). They speak just enough IMAP
+  (greeting, `CAPABILITY`, `LOGIN`, `LIST`, `EXAMINE`, `STATUS`, `UID SEARCH`, `UID FETCH`, `NOOP`,
+  `LOGOUT`) and SMTP (`EHLO`, `MAIL`, `RCPT`, `DATA`, `QUIT`) for the real `imaplib` and `smtplib`
+  clients. The tests are reader and sender unit tests (`unittests/emi_reader/emi_unit_reader_netfaults.py`,
+  `unittests/emi_sender/emi_unit_sender_netfaults.py`) marked `network`, so they run in every unit job on
+  both systems; a change to `unittests/netfaults/` starts the reader and sender standalone jobs.
+  * The proxy uses one thread per direction rather than `asyncio` (AMB-14 named `asyncio`): it must reset
+    a live connection from outside the forwarding loop, which plain sockets do with `SO_LINGER` 0. The
+    mode can change at any time and a live connection follows it at its next chunk; `once=True` applies a
+    fault to one connection and returns to `pass`, so a test sees the client reconnect.
+  * Measured with the real clients: a reset mid-reply (mid-`STATUS` or mid-literal) is
+    `READER_IMAP_CONNECTION_DROPPED` and heals on a new connection; a reset on the client's write reads as
+    dropped on the next command and as `READER_IMAP_SOCKET_WRITE_FAILED` on the one after (Windows 10054),
+    both retried; a server that accepts and never greets is a connect timeout, never retried; the sender
+    retries a reset mid-session once and delivers one email.
+  * **Windows retries a refused connect for about 2 s** before failing, so with a connect timeout below
+    that a refused port reports as a connect timeout. The refused-port tests use a 5 s connect timeout;
+    the tools' default (10 s) is above it.
+* **Layer 3**: `unittests/outage/`, marker `docker`. A separate subset of the unit tests: the default
+  unit run leaves it out (`-m "not docker"` in `pyproject.toml`; `-m docker` selects it), so it never
+  touches the prioritized regression. It needs Docker and a Greenmail container (`EMI_GREENMAIL_CONTAINER`,
+  default `greenmail_server`) and stops that container, so it never runs next to a functional run. CI runs
+  it in its own job `unit-outage` (Ubuntu only, by hand or weekly, never affects project status).
+  * Reader: a wait while Greenmail is stopped ends at once with a network keyword, not "email not
+    received". A wait running when Greenmail stops also ends with a network keyword: the dropped
+    connection is retried, but the reconnect is refused and a refused connect is never retried (§5.5),
+    so the wait does not ride through a restart (AMB-78, open). After the restart a new wait finds a new
+    email.
+  * Sender: a send while Greenmail is stopped fails at connect for every email, exit code 3, without
+    retrying: `SENDER_SMTP_CONNECTION_REFUSED` with Docker on Linux, `SENDER_SMTP_SERVER_UNREACHABLE` with
+    Docker Desktop on Windows, which still accepts a stopped container's port and closes it at once.
+  * Test broker and API: `api.health()` reports `GREENMAIL_NOT_READY` while stopped and ready again
+    after the restart.
+  * Files: `unittests/outage/greenmail_container.py` (`docker stop --time 1`, `docker start`, then waits
+    for Greenmail's readiness), `conftest.py` (the `greenmail` fixture: skipped with
+    `HARNESS_DOCKER_UNAVAILABLE` when Docker or the running container is missing; Greenmail is always
+    running again when a test ends), `emi_unit_outage_greenmail.py`. A restart empties the mailbox. The
+    tests are not marked `network`, so `-m network` never stops Greenmail.
 
 Expected faults are passes when handled correctly; they never trigger the infrastructure job-stop rule
 or the circuit breaker.

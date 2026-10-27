@@ -26,7 +26,7 @@ from emi_test_broker import (
 from emi_test_broker.broker_log import IsoFormatter, debug_entries, log_path, open_log_handler
 from emi_test_broker.cli import build_parser, main
 from emi_test_broker.client import START_ERRORS_LOG, spawn_command
-from emi_test_broker.settings import settings_from_json, settings_to_json
+from emi_test_broker.settings import BROKER_VERSION, settings_from_json, settings_to_json
 from emi_test_broker.codec import (
     batch_request_from_json,
     batch_request_to_json,
@@ -208,7 +208,7 @@ class TestEMIBrokerAutoStart:
     def EMI_TEST_BROKER_UNIT_130060_starts_once_then_ready(self) -> None:
         """Nothing answers: one start, then the new broker answers."""
         settings = BrokerSettings()
-        healthy = {"service": "emi_test_broker", "version": "1.0.0", "config_hash": settings.config_hash()}
+        healthy = {"service": "emi_test_broker", "version": BROKER_VERSION, "config_hash": settings.config_hash()}
         spawned: list[int] = []
         assert self._client([None, None, healthy], spawned, settings).ensure_running()["service"]
         assert spawned == [1]

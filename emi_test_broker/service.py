@@ -176,9 +176,10 @@ class BrokerService:  # pylint: disable=too-many-instance-attributes
                                                             run_id=run_id, match_fields=match_fields)}
                 healthy = True
             finally:
+                # read before the mailbox goes back to the pool, where the next wait resets it
+                result.update({"access_matrix": mailbox.access_matrix, "attempts": mailbox.attempts,
+                               "inventory": mailbox.inventory, "queued_sec": round(timeout - remaining, 3)})
                 self._return_mailbox(mailbox, healthy)
-        result.update({"access_matrix": mailbox.access_matrix, "attempts": mailbox.attempts,
-                       "queued_sec": round(timeout - remaining, 3)})
         _LOG.info("wait run=%s test=%s address=%s ok", run_id or "-", test_id or "-", address)
         return result
 

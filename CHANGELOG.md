@@ -8,6 +8,43 @@ reasoning behind each decision is in [CLAUDE_LOG.md](CLAUDE_LOG.md).
 ## Unreleased
 
 ### Added
+* **Mailbox inventory from every wait** (AMB-76). A report showed what a test found but not what else
+  was in the mailbox, so a slow or crowded mailbox could not be told apart from a missing email, and
+  nothing could be compared across runs. Each wait now records the folder totals (messages, `UIDNEXT`)
+  and the emails at the test's address by kind (`activation`, `invitation`, `no_links`,
+  `unclassified`), when it starts and when it ends. It costs no extra IMAP command: the totals come from
+  the wait's own `EXAMINE` and the kinds from the emails it fetches anyway, since a separate lookup costs
+  about 0.7 s per fetch at 5,000 messages (AMB-71). The inventory goes from the reader through the test
+  broker (version 1.1.0) and `EmiApi`'s observers to the harness, which attaches it to the test and
+  appends one line per wait to `inventory-<worker>.jsonl` in the job folder. A failed wait's error
+  carries it too. The session probe's wait is logged under `C000000`, not under the first test. Never
+  used for pass/fail. `GET /inventory` stays unbuilt.
+* **Network faults on real connections** (AMB-77, layer 2). The network unit tests raised simulated
+  exceptions, so nothing showed what `imaplib` and `smtplib` actually raise when a connection breaks
+  on Windows or Linux. A fault proxy (`unittests/netfaults/`) now sits between the real client and a
+  small simulated IMAP or SMTP server and slows, silences, resets or refuses the connection. 11 new
+  reader and sender tests (`network`) check the keyword and retry decision of each, and that a reset
+  mid-session heals on a new connection with the email delivered or found once. They run in every unit
+  job on both systems; a change to `unittests/netfaults/` starts the reader and sender standalone jobs.
+* **Greenmail outage tests** (AMB-77, layer 3). 4 tests (`unittests/outage/`, marker `docker`) stop
+  and restart the real Greenmail container under the reader, the sender and the API. Each must report
+  the outage with a network keyword, never as an email not received, and `api.health()` must say
+  `GREENMAIL_NOT_READY` and recover. The default unit run leaves them out, so the regression never
+  stops Greenmail; the new `unit-outage` workflow runs them on Ubuntu weekly, by hand and when they
+  change. They found that a wait does not ride through a restart, recorded as open question AMB-78.
+* The README counts 1,472 tests: 453 unit (61 network, 4 outage) and 1,019 functional.
+
+### Changed
+* **P0 + P1 time share is a 30% warning** (AMB-75). The gate printed the share against a 20% target that
+  nothing enforced. The 20% ceiling on the number of P0 and P1 tests stays as it was. For time, P0 + P1
+  should take at most 30% of all test time, leaving 70% for the rest; above it the gate prints
+  `JOB_PRIORITY_TIME_SHARE` in the log and on the run page, and still passes, because timing fails a test
+  only through that test's own time limit. A run without P2-P4 results is not measured, since P0 and P1
+  alone are always 100%.
+
+## 5f9bd6f (2026-10-26)
+
+### Added
 * **A failed or skipped test's emails and broker log lines in its report** (AMB-74). A failure's evidence
   had manifests and error details but not the emails themselves, and CI discards the mailbox, so a wrong
   link or a missing marker could not be checked afterwards. After such a test the harness now asks the
