@@ -312,7 +312,7 @@ user `qa` with the public password `password`, so nothing needs configuring. To 
 
 ## Test Counts
 
-**1,472 tests in total: 453 unit tests (61 of them network tests, 4 outage tests run apart) and 1,019
+**1,474 tests in total: 455 unit tests (63 of them network tests, 4 outage tests run apart) and 1,019
 functional tests.**
 
 **Unit tests**, one folder per tool, no server needed. A **network test** makes a connection fail
@@ -330,13 +330,13 @@ to a functional run. Without Docker or the container they are skipped (`HARNESS_
 
 | Tool | Folder | Unit tests | Of which network | Outage |
 |---|---|---|---|---|
-| Reader | `unittests/emi_reader/` | 96 | 26 | 2 |
+| Reader | `unittests/emi_reader/` | 98 | 28 | 2 |
 | Sender | `unittests/emi_sender/` | 73 | 19 | 1 |
 | Test broker | `unittests/emi_test_broker/` | 56 | 8 | |
 | Greenmail client | `unittests/emi_greenmail/` | 23 | 6 | |
 | Central API (`EmiApi`) | `unittests/emi_api/` | 58 | 2 | 1 |
 | Harness | `unittests/emi_harness/` | 143 | 0 | |
-| **Total** | | **449** | **61** | **4** |
+| **Total** | | **451** | **63** | **4** |
 
 **Functional tests** (`tests/functional/`, against Greenmail). Every functional test goes through the
 public API, so it drives the sender, the test broker and the reader together. The suite is therefore

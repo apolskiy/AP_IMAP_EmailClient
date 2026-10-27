@@ -208,6 +208,11 @@ backoff 0.5 → 1 → 2 → 4 → 5 s: read timeout mid-session, connection drop
 failure, "too many connections" (`READER_IMAP_CONNECTION_LIMIT`). **No retry** for connection refused,
 DNS failure, connect timeout, authentication failure, TLS certificate error or protocol `BAD`: those fail
 at once with the tool's keyword and count as infrastructure failures. The attempt history is attached.
+* **Server restart during a wait** (AMB-78): once the wait has had a working connection (a poll that
+  succeeded, or a session that dropped or timed out), a refused reconnect is retried with the same
+  backoff inside the deadline, since it most likely means a restart. A refused first connect stays
+  fatal. A server that stays down ends the wait at its deadline with `READER_IMAP_CONNECTION_REFUSED` as
+  primary. The sender is unchanged.
 
 ### 5.6 MIME parsing and CTA extraction (AMB-12, AMB-17)
 * Parse with `email` (policy `default`), decoding quoted-printable and base64 parts, RFC 2047 headers,
@@ -733,6 +738,9 @@ Greenmail run against Greenmail.
     dropped on the next command and as `READER_IMAP_SOCKET_WRITE_FAILED` on the one after (Windows 10054),
     both retried; a server that accepts and never greets is a connect timeout, never retried; the sender
     retries a reset mid-session once and delivers one email.
+  * **Linux keeps listening on a socket closed while another thread waits in `accept`** (found by CI
+    run 40450901295, where `refuse` let connections through on Ubuntu only). The proxy shuts the listener
+    down before closing it and waits for connections with `select`, one tick at a time.
   * **Windows retries a refused connect for about 2 s** before failing, so with a connect timeout below
     that a refused port reports as a connect timeout. The refused-port tests use a 5 s connect timeout;
     the tools' default (10 s) is above it.
@@ -742,10 +750,9 @@ Greenmail run against Greenmail.
   default `greenmail_server`) and stops that container, so it never runs next to a functional run. CI runs
   it in its own job `unit-outage` (Ubuntu only, by hand or weekly, never affects project status).
   * Reader: a wait while Greenmail is stopped ends at once with a network keyword, not "email not
-    received". A wait running when Greenmail stops also ends with a network keyword: the dropped
-    connection is retried, but the reconnect is refused and a refused connect is never retried (§5.5),
-    so the wait does not ride through a restart (AMB-78, open). After the restart a new wait finds a new
-    email.
+    received". A wait running when Greenmail stops and starts again rides through it: the dropped
+    connection and the refused reconnects are retried inside the deadline (§5.5, AMB-78), and the wait
+    finds the email sent after the restart.
   * Sender: a send while Greenmail is stopped fails at connect for every email, exit code 3, without
     retrying: `SENDER_SMTP_CONNECTION_REFUSED` with Docker on Linux, `SENDER_SMTP_SERVER_UNREACHABLE` with
     Docker Desktop on Windows, which still accepts a stopped container's port and closes it at once.

@@ -47,15 +47,15 @@ class TestEMIOutageGreenmail:
         assert caught.value.primary in _OUTAGE_KEYWORDS and caught.value.infrastructure
         assert time.monotonic() - started < 25.0
 
-    def EMI_READER_UNIT_100133_stop_mid_wait_ends_the_wait_and_restart_serves_again(
-            self, greenmail: GreenmailContainer) -> None:
-        """Greenmail stopped during a wait ends it with a network keyword (a refused reconnect is not
-        retried, §5.5); after the restart a new wait finds a new email."""
-        outcome: list[BaseException] = []
+    def EMI_READER_UNIT_100133_wait_rides_through_a_restart(self, greenmail: GreenmailContainer) -> None:
+        """Greenmail stopped and started during a wait: the reconnects are retried inside the deadline
+        (AMB-78), and the wait finds the email sent after the restart."""
+        outcome: list[object] = []
+        mailbox = _mailbox()
 
         def _wait() -> None:
             try:
-                _mailbox().wait_for_link(_ADDRESS, Cta.ACTIVATE_ACCOUNT, timeout=60.0)
+                outcome.append(mailbox.wait_for_link(_ADDRESS, Cta.ACTIVATE_ACCOUNT, timeout=120.0))
             except ImapConnectionError as error:
                 outcome.append(error)
 
@@ -63,11 +63,13 @@ class TestEMIOutageGreenmail:
         waiting.start()
         time.sleep(2.0)  # the wait is polling
         greenmail.stop()
-        waiting.join(timeout=60.0)
-        assert outcome and getattr(outcome[0], "primary", "") in _OUTAGE_KEYWORDS
+        time.sleep(3.0)  # the wait is reconnecting and being refused
         greenmail.start()
         _sender().send("activation", _ADDRESS)
-        assert "/activate" in _mailbox().wait_for_link(_ADDRESS, Cta.ACTIVATE_ACCOUNT, timeout=30.0)
+        waiting.join(timeout=120.0)
+        assert outcome and isinstance(outcome[0], str) and "/activate" in outcome[0], outcome
+        assert {str(attempt["keyword"]) for attempt in mailbox.attempts} <= set(_OUTAGE_KEYWORDS)
+        assert mailbox.attempts
 
     def EMI_SENDER_UNIT_110069_send_while_down_exits_3_without_retry(self, greenmail: GreenmailContainer) -> None:
         """A send with Greenmail down fails at connect for every email, exit code 3, not retried.

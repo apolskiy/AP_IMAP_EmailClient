@@ -46,6 +46,11 @@ def _drop() -> ImapConnectionError:
                                infrastructure=True)
 
 
+def _refused() -> ImapConnectionError:
+    """A refused connect: fatal on a wait's first connect, retried after a working session (AMB-78)."""
+    return ImapConnectionError("refused", ReaderKeyword.IMAP_CONNECTION_REFUSED, infrastructure=True)
+
+
 class TestEMIReaderWait:
     """Finding the right email, before and during the wait."""
 
@@ -346,6 +351,35 @@ class TestEMIReaderNetworkFaults:
         assert caught.value.primary == ReaderKeyword.IMAP_CONNECTION_REFUSED
         assert caught.value.infrastructure is True
         assert not clock.sleeps
+
+    @pytest.mark.network
+    def EMI_READER_UNIT_100134_restart_mid_wait_is_ridden_through(self) -> None:
+        """Dropped, then refused twice while the server restarts: retried with backoff, the email is found."""
+        clock = SimClock()
+        server = SimImap(clock)
+        server.arrivals.append((6.0, "INBOX", make_email(to_addr=_ADDRESS)))
+        server.open()  # the pooled connection was working before the restart
+        server.failures["examine"] = [_drop()]
+        server.failures["open"] = [_refused(), _refused()]
+        mailbox = _mailbox(server, clock)
+        assert mailbox.wait_for_link(_ADDRESS, Cta.ACTIVATE_ACCOUNT, timeout=30.0)
+        assert [attempt["keyword"] for attempt in mailbox.attempts] == [
+            ReaderKeyword.IMAP_CONNECTION_DROPPED, ReaderKeyword.IMAP_CONNECTION_REFUSED,
+            ReaderKeyword.IMAP_CONNECTION_REFUSED]
+        assert clock.sleeps[:3] == [0.5, 1.0, 2.0]
+
+    @pytest.mark.network
+    def EMI_READER_UNIT_100135_server_that_stays_down_ends_refused(self) -> None:
+        """Refused on every reconnect until the deadline: the outage is primary, never 'not received'."""
+        clock = SimClock()
+        server = SimImap(clock)
+        server.open()
+        server.failures["examine"] = [_drop()]
+        server.failures["open"] = [_refused() for _index in range(100)]
+        with pytest.raises(ImapConnectionError) as caught:
+            _mailbox(server, clock).wait_for_link(_ADDRESS, Cta.ACTIVATE_ACCOUNT, timeout=10.0)
+        assert caught.value.primary == ReaderKeyword.IMAP_CONNECTION_REFUSED
+        assert clock.now() >= 10.0
 
     def EMI_READER_UNIT_100094_no_readable_folder_names_the_causes(self) -> None:
         """Connected, but every configured folder is unreadable: environment failure with details."""

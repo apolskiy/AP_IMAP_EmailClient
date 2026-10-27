@@ -380,16 +380,18 @@ class Mailbox:
         settle_until: float | None = None
         state: _WaitState | None = None
         last_error: ImapConnectionError | None = None
+        had_session = False  # a working connection during this wait (AMB-78)
         self._attempts = []
         self._inventory = None
         while True:
             try:
                 state = self._start(target) if state is None else state
                 self._poll(state, target)
-                last_error = None
+                last_error, had_session = None, True
             except ImapConnectionError as error:
-                if not error.retryable:
+                if not (error.retryable or self._restarting(error, had_session)):
                     raise
+                had_session = had_session or error.retryable  # only a live session can drop or time out
                 last_error = self._record_retry(error)
             if state is not None and state.before is not None:
                 self._inventory = Inventory(target.address, target.match_fields, state.before,
@@ -407,6 +409,12 @@ class Mailbox:
                     return found  # the deadline cut the settle window short
                 self._give_up(target, state, last_error, found)
             self._sleeper(min(self._next_delay(last_error), max(deadline - now, 0.0)))
+
+    @staticmethod
+    def _restarting(error: ImapConnectionError, had_session: bool) -> bool:
+        """A refused reconnect after this wait had a working connection: most likely a server restart, so
+        it is retried inside the deadline (AMB-78). A refused first connect stays fatal."""
+        return had_session and error.primary == ReaderKeyword.IMAP_CONNECTION_REFUSED
 
     def _record_retry(self, error: ImapConnectionError) -> ImapConnectionError:
         """Remember a healable failure and drop the connection so the next poll reconnects."""

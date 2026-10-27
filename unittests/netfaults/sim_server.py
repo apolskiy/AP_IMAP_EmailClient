@@ -3,10 +3,11 @@
 """What the simulated IMAP and SMTP servers share: a threaded loopback server and line reading."""
 
 import socketserver
+import sys
 import threading
 from collections.abc import Iterator
 from types import TracebackType
-from typing import BinaryIO, Self
+from typing import Any, BinaryIO, Self
 
 
 def lines_of(stream: BinaryIO) -> Iterator[bytes]:
@@ -41,6 +42,16 @@ class LoopbackServer(socketserver.ThreadingTCPServer):
             handler: The session handler.
         """
         super().__init__(("127.0.0.1", 0), handler)
+
+    def handle_error(self, request: Any, client_address: Any) -> None:
+        """Stay quiet about connections the fault proxy broke on purpose; report anything else.
+
+        Args:
+            request: The client's socket.
+            client_address: The client's address.
+        """
+        if not isinstance(sys.exception(), OSError):
+            super().handle_error(request, client_address)
 
 
 class SimServer:

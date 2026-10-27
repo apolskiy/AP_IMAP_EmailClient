@@ -7,6 +7,22 @@ reasoning behind each decision is in [CLAUDE_LOG.md](CLAUDE_LOG.md).
 
 ## Unreleased
 
+### Changed
+* **A wait rides through a mail server restart** (AMB-78). The new outage tests showed that a wait
+  running while Greenmail restarted ended at once: the dropped connection was retried, but the
+  reconnect was refused, and a refused connect was never retried. Once a wait has had a working
+  connection, a refused reconnect is now retried with the usual backoff inside the deadline, and the
+  wait finds the email sent after the restart. A refused first connect still fails at once; a server
+  that stays down ends the wait at its deadline with `READER_IMAP_CONNECTION_REFUSED`. 2 new reader
+  tests; outage test 100133 now checks the ride-through.
+
+### Fixed
+* **The fault proxy's `refuse` mode let connections through on Linux.** In run 40450901295 the two
+  refused-port tests (100128, 110066) failed on Ubuntu only: a socket closed while another thread waits
+  in `accept` keeps listening on Linux. The proxy now shuts the listener down before closing it and
+  polls for connections. Checked in a Linux Python 3.14 container (all 451 unit tests pass). The
+  simulated servers no longer print a traceback for each connection the proxy breaks on purpose.
+
 ## 6c56879 (2026-10-26)
 
 ### Added

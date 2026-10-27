@@ -179,10 +179,20 @@ class FaultProxy:  # pylint: disable=too-many-instance-attributes
         self._spawn(self._accept, listener)
 
     def _close_listener(self) -> None:
-        """Stop accepting; the port then refuses connections."""
+        """Stop accepting; the port then refuses connections.
+
+        On Linux a socket closed while another thread waits in ``accept`` keeps listening until that call
+        returns, so the listener is shut down first (Windows refuses that call on a listening socket, which
+        is harmless there) and the accept loop never blocks for more than one tick.
+        """
         listener, self._listener = self._listener, None
-        if listener is not None:
-            listener.close()
+        if listener is None:
+            return
+        try:
+            listener.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+        listener.close()
 
     def _fault_taken(self) -> None:
         """Count a fault; a one-time fault returns the proxy to ``pass``."""
@@ -193,7 +203,9 @@ class FaultProxy:  # pylint: disable=too-many-instance-attributes
 
     def _accept(self, listener: socket.socket) -> None:
         """Accept connections until the listener closes."""
-        while not self._stopping.is_set():
+        while not self._stopping.is_set() and self._listener is listener:
+            if not self._readable(listener):
+                continue
             try:
                 client, _peer = listener.accept()
             except OSError:
