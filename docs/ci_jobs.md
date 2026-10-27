@@ -4,22 +4,26 @@ SPDX-License-Identifier: Apache-2.0
 -->
 # CI Jobs: What Runs, When, and How
 
-> Workflows: `.github/workflows/` (`joint-ci-workflow.yml`, `functional-chain.yml`, `unit-standalone.yml`,
+> Workflows: `.github/workflows/` (`ci-regression-run.yml`, `functional-chain.yml`, `unit-standalone.yml`,
 > `unit-tool.yml`, `ci-debug-run.yml`, `test-validity.yml`). Source of decisions: `docs/design/phase0_email_client_ambiguities.md`
 > (AMB-15, AMB-26, AMB-44, AMB-48, AMB-55, AMB-56, AMB-57, AMB-64, AMB-66).
 
 ## When CI runs
 
-* On every **push** that changes tests, the harness, or the tools: `tests/`, `unittests/`,
-  `emi_harness/`, `emi_reader/`, `emi_sender/`, `emi_test_broker/`, and the files that control how
-  they run (`requirements*.txt`, `pyproject.toml`, `.pylintrc`, `.github/workflows/`).
+* On every **push** that changes tests, the harness, or the tools: `tests/`, `unittests/`, every
+  `emi_*/` folder, `conftest.py`, and the files that control how they run (`requirements*.txt`,
+  `pyproject.toml`, `.pylintrc`, `.github/`).
 * **After merge**: merging into `main` creates a push to `main`, which triggers the same pipeline.
-* Docs-only pushes do not trigger CI.
+* **Documentation never triggers CI.** The trigger lists name only the paths above, so root Markdown
+  (README, CHANGELOG, CLAUDE_LOG, CLAUDE.md), `docs/` and `.claude/` are left out, and a final `!**/*.md`
+  drops Markdown even inside a listed folder. A push that mixes documentation and code still runs.
+* One push can start two workflows: `ci-regression-run` and, when a tool folder or its unit tests
+  changed, `unit-standalone` for that tool.
 * On every **pull request into `main`** with such changes, so a change is tested merged with the
   current `main` before it lands.
 * **By hand, at any time**: every CI job and pipeline can be started manually from GitHub
-  (*Actions → select the workflow → Run workflow*), for example to re-run `joint-ci-workflow`
-  without pushing. A manual `joint-ci-workflow` run has a tick box for each functional job (P0, P1,
+  (*Actions → select the workflow → Run workflow*), for example to re-run `ci-regression-run`
+  without pushing. A manual `ci-regression-run` run has a tick box for each functional job (P0, P1,
   P2, P3, P4, all ticked by default): `lint` and `unit` always run first, then only the ticked jobs.
 
 ## When a new run starts while another is still running
@@ -34,9 +38,10 @@ SPDX-License-Identifier: Apache-2.0
 Queuing is deliberately not used on `main`: GitHub keeps only one waiting run per group and drops
 older waiting runs, so a quick series of merges could leave some merges untested.
 
-## Joint CI workflow `joint-ci-workflow` (decides project status)
+## Regression run `ci-regression-run` (decides project status)
 
-The workflow joins every gate into one run. The jobs run in this order. `lint` and `unit` must **pass** before anything after them starts. The
+The workflow joins every gate into one run (named `joint-ci-workflow` until 2026-10-27; GitHub lists its
+earlier runs under that name). The jobs run in this order. `lint` and `unit` must **pass** before anything after them starts. The
 functional jobs then run as a chain, **P0 → P1 → P2, P3 and P4** (the last three side by side, each on
 its own runner, AMB-67): each starts when the previous one has finished, and the chain stops only if a
 job **aborts** (an infrastructure failure, the circuit breaker, or the job's time budget). A job that

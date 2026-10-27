@@ -1,10 +1,13 @@
 # SPDX-FileCopyrightText: 2026 Aleksandr Polskiy
 # SPDX-License-Identifier: Apache-2.0
-# joint-ci-workflow, the main pipeline: decides project status (design §12, docs/ci_jobs.md).
+# ci-regression-run, the regression pipeline: decides project status (design §12, docs/ci_jobs.md).
 # lint -> unit (Windows + Ubuntu) -> functional chain per OS (P0 -> P1 -> P2 | P3 | P4) -> quality-gate.
 # A manual run chooses which functional jobs run; lint and the unit tests always run first.
-name: joint-ci-workflow
+name: ci-regression-run
 
+# Only code and the files that control how it runs trigger CI; documentation never does: root Markdown
+# (README, CHANGELOG, CLAUDE_LOG), docs/ and .claude/ are not listed, and the last pattern drops
+# Markdown anywhere, even inside a listed folder.
 on:
   push:
     paths:
@@ -16,6 +19,7 @@ on:
       - "pyproject.toml"
       - ".pylintrc"
       - ".github/**"
+      - "!**/*.md"
   pull_request:
     branches: [main]
     paths:
@@ -27,6 +31,7 @@ on:
       - "pyproject.toml"
       - ".pylintrc"
       - ".github/**"
+      - "!**/*.md"
   workflow_dispatch:
     inputs:
       p0:
@@ -54,7 +59,7 @@ on:
 # runs get a group of their own (the run ID), so they are never cancelled and may run in parallel.
 concurrency:
   group: >-
-    joint-ci-workflow-${{ (github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main')
+    ci-regression-run-${{ (github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main')
     && github.run_id || github.ref }}
   cancel-in-progress: true
 

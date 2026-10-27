@@ -560,9 +560,11 @@ User-facing details: `docs/ci_jobs.md`. Rule source: `.claude/rules/framework-ru
 
 * **Triggers**: every push changing tests, tools, harness or their run configuration (requirements,
   `pyproject.toml`, `.pylintrc`, workflows), including the push a merge into `main` creates; every pull
-  request into `main` with such changes (push and PR runs both run, AMB-60); docs-only changes do not
-  trigger. **Every workflow has `workflow_dispatch`**, so any job can be started by hand.
-* **Joint CI workflow `joint-ci-workflow`** (project status). Started by hand, it takes one tick box per
+  request into `main` with such changes (push and PR runs both run, AMB-60); documentation never
+  triggers: the trigger lists name only code paths, and a final `!**/*.md` excludes Markdown even inside
+  them. **Every workflow has `workflow_dispatch`**, so any job can be started by hand.
+* **Regression run `ci-regression-run`** (project status; named `joint-ci-workflow` until 2026-10-27,
+  AMB-66). Started by hand, it takes one tick box per
   functional job (P0, P1, P2, P3, P4; all ticked by default, AMB-66, AMB-67): `lint` and `unit` always run, then the
   ticked jobs; a job left out neither runs nor stops later ones, and `quality-gate` measures the results
   that exist (it does not run when no functional job is ticked). Pushes and pull requests run every job.
@@ -602,7 +604,7 @@ User-facing details: `docs/ci_jobs.md`. Rule source: `.claude/rules/framework-ru
 * **Test validity** (§13.4, AMB-64): `test-validity` (manual and weekly, Ubuntu) runs the named-fault
   and stability checks; it never blocks. Weekly it runs every fault and repeats P0 and P1 three times (a
   full-suite stability run would take hours every week); by hand any fault, job and repeat count.
-* **Workflow files**: `.github/workflows/joint-ci-workflow.yml` (project status), `functional-chain.yml` (the P0 → P1 →
+* **Workflow files**: `.github/workflows/ci-regression-run.yml` (project status), `functional-chain.yml` (the P0 → P1 →
   P2 / P3 / P4 chain, called once per OS), `ci-debug-run.yml`, `unit-standalone.yml` (a `changes` job lists the
   tools whose folders changed; each tool's job calls `unit-tool.yml`), `test-validity.yml`. Shared steps
   are composite actions: `.github/actions/harness-job` (Python, requirements, Greenmail, broker, one

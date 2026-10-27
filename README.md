@@ -333,7 +333,7 @@ CI runs on every push and every pull request into `main` that changes tests, the
 tools, including the push a merge into `main` creates. Every CI job can also be started by hand
 from GitHub (*Actions → Run workflow*). Full details, with local commands for every job: [docs/ci_jobs.md](docs/ci_jobs.md).
 
-**Joint CI workflow `joint-ci-workflow` (decides project status), in order:**
+**Regression run `ci-regression-run` (decides project status), in order:**
 
 1. `lint`: pylint must score 10.00/10.
 2. `unit`: the unit tests of every tool, the harness and the central API, on Windows and Ubuntu.
@@ -346,7 +346,7 @@ from GitHub (*Actions → Run workflow*). Full details, with local commands for 
 4. `quality-gate`: P0 and P1 must pass 100% (a skip is not a pass), P2–P4 together at least 85%,
    and all functional tests together at least 95%.
 
-Started by hand, `joint-ci-workflow` offers a tick box per functional job (P0, P1, P2, P3, P4); `lint` and
+Started by hand, `ci-regression-run` offers a tick box per functional job (P0, P1, P2, P3, P4); `lint` and
 `unit` always run first, then only the ticked jobs.
 
 **Operating systems:** unit and functional tests run on both **Windows and Ubuntu**, side by side,
@@ -396,7 +396,7 @@ says how much of it is built.
 | [docs/design/email_client_harness_design.md](docs/design/email_client_harness_design.md) | **Design document (Phase 2)**, each section citing the register rows it implements (see the next table). |
 | [docs/rtm.md](docs/rtm.md) | **Requirements traceability matrix.** Each requirement → design section → code → unit test IDs → status (Done / Partial with the gap named / Planned). |
 | [docs/keywords.md](docs/keywords.md) | **Failure keyword catalog.** Keyword grammar; every `READER_`, `SENDER_`, `TEST_BROKER_`, `GREENMAIL_`, `API_`, `HARNESS_`, `CASE_` and `JOB_` keyword with its meaning, outcome (fail / skip / skip + stop / info) and the first thing to check. A unit test fails if code uses a keyword missing here. |
-| [docs/ci_jobs.md](docs/ci_jobs.md) | **CI jobs.** When CI runs, overlapping runs, the joint CI workflow (lint, unit, P0 → P1 → P2 / P3 / P4, quality gate), the standalone jobs, and the local command for each job. |
+| [docs/ci_jobs.md](docs/ci_jobs.md) | **CI jobs.** When CI runs, overlapping runs, the regression run `ci-regression-run` (lint, unit, P0 → P1 → P2 / P3 / P4, quality gate), the standalone jobs, and the local command for each job. |
 | [CHANGELOG.md](CHANGELOG.md) | **Change log.** What changed in each commit, newest first, with the CI runs that found the problems it fixed. |
 | [CLAUDE_LOG.md](CLAUDE_LOG.md) | **Decision and quality log.** What was built in each phase and step, key architectural decisions with their register rows, and pylint scores over time. |
 | [CLAUDE.md](CLAUDE.md), [.claude/rules/](.claude/rules) | **Working rules** the AI collaborator followed: no AI commits, design before code, pylint 10.00/10, naming, test IDs, shell rules. |
@@ -416,7 +416,7 @@ Design document sections:
 | §9 | Harness: CLI (§9.1), step model (§9.2), outcomes and keywords (§9.3), failing fast (§9.4), dependencies (§9.5), session setup and probe email (§9.6), priorities and gates (§9.7), reports (§9.8) | `emi_harness/` |
 | §10 | Time budgets: step, test, job, send, wait | `emi_harness/steps.py`, `plugin.py` |
 | §11 | IMAP connection limit and the connection budget | `emi_test_broker/leases.py`, `emi_harness/cli.py` |
-| §12 | CI: joint CI workflow, functional chain per OS, standalone and debug jobs, overlapping runs | `.github/workflows/`, `.github/actions/` |
+| §12 | CI: regression run, functional chain per OS, standalone and debug jobs, overlapping runs | `.github/workflows/`, `.github/actions/` |
 | §13 | Test strategy: unit tests, network faults in three layers, functional tests, test validity (§13.4) | `unittests/`, `tests/`, `emi_harness/faults.py`, `validity.py` |
 | §14 | Dependencies and project files | `requirements*.txt`, `pyproject.toml` |
 | §15 | What was left out | see [What Was Left Out](#what-was-left-out) |
@@ -437,7 +437,7 @@ AP_IMAP_EmailClient/
 │       ├── testing-standards.md       # Test naming, TestRail IDs, ASCII-only identifiers
 │       └── worktree-rules.md          # No AI commits, secrets protection, IDE ignores
 ├── .github/
-│   ├── workflows/             # CI: joint CI workflow, functional chain per OS, standalone unit jobs, debug run
+│   ├── workflows/             # CI: regression run, functional chain per OS, standalone unit jobs, debug run
 │   └── actions/               # Shared CI steps: start Greenmail, run one harness job
 ├── docs/
 │   ├── ci_jobs.md             # CI jobs and how to run them

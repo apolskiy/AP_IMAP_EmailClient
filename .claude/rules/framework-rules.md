@@ -10,7 +10,7 @@ harness, or the tools, or the files that control how they run (requirements, `py
 `.pylintrc`, workflow files), and every pull request into `main` with such changes. Docs-only
 changes do not trigger CI. **Every CI job can also be started manually** at any time.
 
-**Joint CI workflow `joint-ci-workflow`** (determines project status; a manual run chooses which of the
+**Regression run `ci-regression-run`** (determines project status; a manual run chooses which of the
 P0, P1, P2, P3 and P4 jobs run, always after lint and unit tests):
 1. **Gate 1 - Static Analysis**: `pylint --rcfile=.pylintrc` across all modules achieving **10.00/10**.
 2. **Gate 2 - Unit Tests (mandatory)**: every unit-test folder (`unittests/emi_reader/`, `unittests/emi_sender/`,
@@ -32,7 +32,7 @@ P0, P1, P2, P3 and P4 jobs run, always after lint and unit tests):
 4. **Gate 4 - CI Debug Job (`ci-debug-run`)**: A separate, non-blocking pipeline job supporting custom runs from explicit test lists or file inputs.
 
 **Standalone unit jobs** (do **not** affect project status): one job per tool, so bugs can be ironed
-out without waiting for `joint-ci-workflow`. Each runs automatically only when its own tool folder or
+out without waiting for `ci-regression-run`. Each runs automatically only when its own tool folder or
 its own unit-test folder changes, and, like every CI job, can also be started manually. Failures are
 reported but never turn the project status red.
 * `unit-emi-reader`: `emi_reader/` or `unittests/emi_reader/`

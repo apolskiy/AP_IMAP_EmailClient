@@ -7,7 +7,13 @@ reasoning behind each decision is in [CLAUDE_LOG.md](CLAUDE_LOG.md).
 
 ## Unreleased
 
-Nothing yet.
+### Changed
+* **Documentation never triggers CI.** The trigger lists already named only code paths, so the change
+  log push started nothing; a Markdown file inside a listed folder (a tool's README, a note under
+  `.github/`) would still have started a full regression. Both `ci-regression-run` and
+  `unit-standalone` now end their path lists with `!**/*.md`.
+* **`joint-ci-workflow` renamed `ci-regression-run`** (AMB-66 revised): the name says what it runs and
+  pairs with `ci-debug-run`. GitHub lists the earlier runs under the old name.
 
 ## bd67917 (2026-10-26)
 

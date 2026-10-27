@@ -4,6 +4,7 @@
 # Each runs when its own tool folder or unit-test folder changed, or by hand.
 name: unit-standalone
 
+# Markdown never triggers a run, even inside a tool folder (the last pattern).
 on:
   push:
     paths:
@@ -17,6 +18,7 @@ on:
       - "unittests/emi_test_broker/**"
       - "unittests/emi_greenmail/**"
       - "unittests/emi_harness/**"
+      - "!**/*.md"
   pull_request:
     branches: [main]
     paths:
@@ -30,6 +32,7 @@ on:
       - "unittests/emi_test_broker/**"
       - "unittests/emi_greenmail/**"
       - "unittests/emi_harness/**"
+      - "!**/*.md"
   workflow_dispatch:
     inputs:
       tool:

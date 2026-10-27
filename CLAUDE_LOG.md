@@ -54,6 +54,7 @@ live in `docs/design/phase0_email_client_ambiguities.md`; this log records when 
 | 2026-10-27 | Allure: priorities are labels (`parentSuite`, `severity`, `tag`), failure keyword families are categories; the harness verdict sets each non-passed result's status and `[KEYWORD]` message, because Allure categories match only messages and never see passed tests | AMB-69 |
 | 2026-10-27 | Batch cases split across P2, P3 and P4 by seed: in runs 40437111627 and 40437565154 P2 took 16-25 min against about 4 for P3 and P4, because it sent about twice the mail and every wait searches the whole mailbox, which slows as it fills | AMB-70 |
 | 2026-10-27 | `CHANGELOG.md` started, covering every commit since the first one | n/a |
+| 2026-10-27 | The status workflow renamed `ci-regression-run` (from `joint-ci-workflow`), pairing with `ci-debug-run`; Markdown excluded from every CI trigger | AMB-66 |
 
 ## Pylint scores
 
