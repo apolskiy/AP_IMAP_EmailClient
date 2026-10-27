@@ -81,7 +81,8 @@ class TestEMIHarnessPlugin:
         assert outcomes["C400002"].primary == CaseKeyword.VERIFICATION_FAILED
         assert outcomes["C400003"].primary == CaseKeyword.UNEXPECTED_ERROR
         assert "KeyError" in outcomes["C400003"].secondary
-        result.stdout.fnmatch_lines(["*EMI job all*", f"*FAILED {CaseKeyword.VERIFICATION_FAILED}*"])
+        # The keyword summary writes the status in lower case; fnmatch ignores case only on Windows.
+        result.stdout.fnmatch_lines(["*EMI job all*", f"*1  failed {CaseKeyword.VERIFICATION_FAILED}*"])
 
     def EMI_HARNESS_UNIT_200101_infrastructure_skip_stops_job(self, project: pytest.Pytester) -> None:
         """An infrastructure skip skips the test and every later one with the same keyword (fail fast)."""

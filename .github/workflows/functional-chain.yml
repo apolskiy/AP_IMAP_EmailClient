@@ -31,7 +31,7 @@ jobs:
     runs-on: ${{ inputs.os }}
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: ./.github/actions/harness-job
         with:
           command: emi_harness.cli --priority P0 --allure -n ${{ inputs.workers }}
@@ -46,7 +46,7 @@ jobs:
     outputs:
       exit-code: ${{ steps.job.outputs.exit-code }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - id: job
         uses: ./.github/actions/harness-job
         with:
@@ -62,7 +62,7 @@ jobs:
     runs-on: ${{ inputs.os }}
     timeout-minutes: 75
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: ./.github/actions/harness-job
         with:
           command: emi_harness.cli --priority P2-P4 --allure -n ${{ inputs.workers }}
