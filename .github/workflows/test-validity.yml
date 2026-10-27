@@ -1,0 +1,81 @@
+# SPDX-FileCopyrightText: 2026 Aleksandr Polskiy
+# SPDX-License-Identifier: Apache-2.0
+# test-validity (design §13.4, AMB-64): proves the functional tests fail when a tool is broken (named
+# faults) and pass when it works (stability repeats, timing margins). Never affects project status.
+# Weekly: every fault, and P0 and P1 repeated 3 times. By hand: choose the check, the fault, the job
+# to repeat and the number of repeats. Each check uploads its summary (reports/validity/) and the
+# underlying jobs' reports.
+name: test-validity
+
+on:
+  schedule:
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+    inputs:
+      check:
+        description: Which check to run
+        type: choice
+        default: both
+        options: [both, faults, stability]
+      fault:
+        description: Named fault (faults check)
+        type: choice
+        default: all
+        options:
+          - all
+          - sender-drops-email
+          - sender-ignores-field
+          - reader-any-field
+          - reader-ignores-markers
+          - reader-slot-collapse
+          - reader-duplicates-email
+          - reader-returns-extra
+          - reader-wrong-link
+          - reader-gives-up-early
+      priority:
+        description: Job to repeat (stability check)
+        type: choice
+        default: P0
+        options: [P0, P1, P2, P3, P4, all]
+      repeat:
+        description: Repeats (stability check, at least 2)
+        type: string
+        default: "3"
+
+permissions:
+  contents: read
+
+jobs:
+  faults:
+    if: ${{ github.event_name == 'schedule' || inputs.check != 'stability' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/harness-job
+        with:
+          command: >-
+            emi_harness.validity faults -n 4
+            ${{ (github.event_name != 'schedule' && inputs.fault != 'all') && format('--fault {0}', inputs.fault) || '' }}
+          artifact: validity-faults-${{ github.run_id }}
+          password: ${{ secrets.EMI_GREENMAIL_PASSWORD || 'password' }}
+
+  stability:
+    if: ${{ github.event_name == 'schedule' || inputs.check != 'faults' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        priority: >-
+          ${{ fromJSON(github.event_name == 'schedule' && '["P0", "P1"]' || format('["{0}"]', inputs.priority)) }}
+    name: stability (${{ matrix.priority }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/harness-job
+        with:
+          command: >-
+            emi_harness.validity stability -n 4 --priority ${{ matrix.priority }}
+            --repeat ${{ github.event_name == 'schedule' && '3' || inputs.repeat }}
+          artifact: validity-stability-${{ matrix.priority }}-${{ github.run_id }}
+          password: ${{ secrets.EMI_GREENMAIL_PASSWORD || 'password' }}

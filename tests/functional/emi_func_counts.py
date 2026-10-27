@@ -38,10 +38,10 @@ class TestEMICounts:
                                                 settle_window=0.0)
             # Lists, not sets: an extra or duplicated email must not collapse into a match.
             step.verify(f"exactly {count} received", len(emails) == count)
-            step.verify("the received emails are the sent ones",
-                        sorted(item.message_id for item in emails) == sorted(entry.message_id for entry in manifest.sent))
-            step.verify("each link is the one sent with it",
-                        sorted(str(item.link) for item in emails) == sorted(str(entry.link) for entry in manifest.sent))
+            sent_ids = sorted(entry.message_id for entry in manifest.sent)
+            step.verify("the received emails are the sent ones", sorted(item.message_id for item in emails) == sent_ids)
+            sent_links = sorted(str(entry.link) for entry in manifest.sent)
+            step.verify("each link is the one sent with it", sorted(str(item.link) for item in emails) == sent_links)
 
 
 class TestEMICountExceeded:

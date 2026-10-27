@@ -580,7 +580,8 @@ User-facing details: `docs/ci_jobs.md`. Rule source: `.claude/rules/framework-ru
 * **Overlapping runs**: PR / feature-branch runs cancel the older run of the same branch; `main` and
   manual runs are never cancelled and may run in parallel; a job using a shared real mailbox queues.
 * **Test validity** (§13.4, AMB-64): `test-validity` (manual and weekly, Ubuntu) runs the named-fault
-  and stability checks; it never blocks.
+  and stability checks; it never blocks. Weekly it runs every fault and repeats P0 and P1 three times (a
+  full-suite stability run would take hours every week); by hand any fault, job and repeat count.
 * **Workflow files**: `.github/workflows/joint-ci-workflow.yml` (project status), `functional-chain.yml` (the P0 → P1 →
   P2 / P3 / P4 chain, called once per OS), `ci-debug-run.yml`, `unit-standalone.yml` (a `changes` job lists the
   tools whose folders changed; each tool's job calls `unit-tool.yml`), `test-validity.yml`. Shared steps

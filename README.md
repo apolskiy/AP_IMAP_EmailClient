@@ -13,9 +13,8 @@ with its mail-server connections and its log. The tool also has command lines of
 
 > **Status:** implementation in progress. The reader, sender, Greenmail client, test broker, central
 > API (`EmiApi`) and test harness are built, unit-tested and checked against Greenmail, and the
-> functional suite has 1,016 test cases. The CI workflows and the test-validity checks (design §13.4)
-> are next. What is built and what is not yet is
-> tracked in [docs/rtm.md](docs/rtm.md).
+> functional suite has 1,016 test cases, with CI workflows and test-validity checks (design §13.4).
+> What is built and what is not yet is tracked in [docs/rtm.md](docs/rtm.md).
 
 ## Getting Started
 
@@ -332,9 +331,17 @@ checks it arrives in a folder the reader can open. If it does not, the run stops
 tests are skipped (`HARNESS_PROBE_EMAIL_NOT_RECEIVED`).
 
 **Not part of project status:** `ci-debug-run` (run by hand for chosen tests, a test-list file or a
-keyword) and one standalone unit job per tool (`unit-emi-reader`, `unit-emi-sender`,
-`unit-emi-test-broker`, `unit-emi-greenmail`, `unit-emi-harness`) for fixing bugs. Each runs only when its own tool or its own unit
-tests change.
+keyword), one standalone unit job per tool (`unit-emi-reader`, `unit-emi-sender`,
+`unit-emi-test-broker`, `unit-emi-greenmail`, `unit-emi-harness`) for fixing bugs, each run only when its own tool or its own unit
+tests change, and `test-validity` (weekly and by hand, see below).
+
+**Test validity:** a passing test is only worth something if it would fail when the tool is broken.
+`test-validity` runs each functional test that should catch a deliberately broken tool (a **named
+fault**, such as a sender that drops one email or a reader that returns one email too many) with that
+fault switched on, and checks it fails with the expected keyword. It also repeats tests on a healthy
+setup to find flaky tests and time limits that are too tight. A test that would pass while checking
+nothing fails with `CASE_NO_VERIFICATION` in every run. Results produced under a fault are never
+accepted by the quality gate.
 
 **Overlapping runs:** a new run on a pull request or feature branch cancels the older one for that
 branch. Runs on `main` and manual runs are never cancelled and can run side by side.
@@ -345,6 +352,8 @@ branch. Runs on `main` and manual runs are never cancelled and can run side by s
 python -m pytest unittests                       # unit gate
 python -m emi_harness.cli --priority P0         # one job (P0, P1, P2, P3, P4, or P2-P4 as one)
 python -m emi_harness.cli --test <name>         # one test; also --file <list.txt>, --keyword <KEYWORD>
+python -m emi_harness.validity faults           # every named fault against its catching tests
+python -m emi_harness.validity stability --priority P1 --repeat 3   # flaky tests, thin time margins
 ```
 
 ## Documentation Map
@@ -377,8 +386,8 @@ Design document sections:
 | §9 | Harness: CLI (§9.1), step model (§9.2), outcomes and keywords (§9.3), failing fast (§9.4), dependencies (§9.5), session setup and probe email (§9.6), priorities and gates (§9.7), reports (§9.8) | `emi_harness/` |
 | §10 | Time budgets: step, test, job, send, wait | `emi_harness/steps.py`, `plugin.py` |
 | §11 | IMAP connection limit and the connection budget | `emi_test_broker/leases.py`, `emi_harness/cli.py` |
-| §12 | CI pipeline, operating systems, overlapping runs | n/a (CI workflows planned) |
-| §13 | Test strategy: unit tests, network faults in three layers, functional tests | `unittests/`, `tests/` |
+| §12 | CI: joint CI workflow, functional chain per OS, standalone and debug jobs, overlapping runs | `.github/workflows/`, `.github/actions/` |
+| §13 | Test strategy: unit tests, network faults in three layers, functional tests, test validity (§13.4) | `unittests/`, `tests/`, `emi_harness/faults.py`, `validity.py` |
 | §14 | Dependencies and project files | `requirements*.txt`, `pyproject.toml` |
 | §15 | What was left out | see [What Was Left Out](#what-was-left-out) |
 

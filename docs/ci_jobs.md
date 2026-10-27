@@ -5,7 +5,7 @@ SPDX-License-Identifier: Apache-2.0
 # CI Jobs: What Runs, When, and How
 
 > Workflows: `.github/workflows/` (`joint-ci-workflow.yml`, `functional-chain.yml`, `unit-standalone.yml`,
-> `unit-tool.yml`, `ci-debug-run.yml`). Source of decisions: `docs/design/phase0_email_client_ambiguities.md`
+> `unit-tool.yml`, `ci-debug-run.yml`, `test-validity.yml`). Source of decisions: `docs/design/phase0_email_client_ambiguities.md`
 > (AMB-15, AMB-26, AMB-44, AMB-48, AMB-55, AMB-56, AMB-57, AMB-64, AMB-66).
 
 ## When CI runs
@@ -81,7 +81,7 @@ arrives in a folder the reader can open. If not, the job stops at once and every
 | `unit-emi-test-broker` | Automatically when `emi_test_broker/` or `unittests/emi_test_broker/` changes; also by hand | Test broker unit tests on their own. Never block. |
 | `unit-emi-greenmail` | Automatically when `emi_greenmail/` or `unittests/emi_greenmail/` changes; also by hand | Greenmail client unit tests on their own. Never block. |
 | `unit-emi-harness` | Automatically when `emi_harness/` or `unittests/emi_harness/` changes; also by hand | Harness unit tests on their own. Never block. |
-| `test-validity` (planned) | By hand and weekly | Proves the functional tests fail when a tool is broken (named faults) and pass when it works (repeat runs, timing margins); design §13.4. Never blocks. |
+| `test-validity` | Weekly (Monday 03:00 UTC: every named fault, and P0 and P1 repeated 3 times); by hand with a choice of check, fault, job to repeat and repeats | Proves the functional tests fail when a tool is broken (named faults) and pass when it works (repeat runs, timing margins); design §13.4. Ubuntu. Never blocks. |
 
 The standalone unit jobs run on Windows and Ubuntu. A manual run of `unit-standalone` offers one tool or
 all of them.
@@ -110,5 +110,6 @@ Run these from the repository root after the Greenmail setup in the README. They
 | `functional-p0` … `functional-p4` | `python -m emi_harness.cli --priority P0` (or `P1`, `P2`, `P3`, `P4`; locally also `P2-P4` as one job, which itself needs 85%) |
 | `quality-gate` | `python -m emi_harness.gate reports/<run>` |
 | `ci-debug-run` | `python -m emi_harness.cli --test <name>` / `--file <list.txt>` / `--keyword <KEYWORD>` |
+| `test-validity` | `python -m emi_harness.validity faults [--fault <name>]`; `python -m emi_harness.validity stability --priority P1 --repeat 3` |
 
 `emi_test_broker` starts automatically on the first test that needs it (port 8025 by default).
