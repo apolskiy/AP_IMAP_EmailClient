@@ -3,8 +3,9 @@
 """When a job stops (design §9.4).
 
 * An infrastructure failure (failed PRE step, or a network fault retries did not cure) stops any job.
-* Every P0 test is critical: a P0 failure is ``JOB_CRITICAL_FUNCTIONAL_FAILURE`` and aborts the job.
-* Ordinary functional failures are isolated.
+* Functional failures are isolated, P0 included (AMB-65): a P0 failure is ``JOB_CRITICAL_FUNCTIONAL_FAILURE``
+  for the job's result (the CLI reports it), but the job goes on; only the failed test's dependents are
+  skipped, in this job and in the later jobs of the run.
 * Circuit breaker (P2-P4 and debug runs): 5 failures in a row with the same primary keyword ->
   ``JOB_CIRCUIT_BREAKER_OPEN``; a pass or a different keyword resets the count; skips do neither.
 * Job time budget exceeded -> ``JOB_TIMEOUT``.
@@ -114,9 +115,6 @@ class JobController:
         if outcome.status is Status.PASSED:
             self._streak_keyword, self._streak = "", 0
             return None
-        if outcome.priority == "P0":
-            return StopDecision(JobKeyword.CRITICAL_FUNCTIONAL_FAILURE, (outcome.primary,),
-                                f"P0 test {name} failed with {outcome.primary}")
         if not self._job.breaker:
             return None
         if outcome.primary == self._streak_keyword:

@@ -16,6 +16,17 @@ inputs:
     description: Password of the Greenmail test user.
     required: false
     default: password
+  run-id:
+    description: Run ID shared by the jobs of one chain (empty for a new one).
+    required: false
+    default: ""
+  previous:
+    description: >-
+      Artifact pattern of earlier jobs of the same run (e.g. reports-ubuntu-p0). Their results are put
+      in place before the run, so dependents of their failed tests are skipped (AMB-65), and removed
+      before the upload, so no result is counted twice.
+    required: false
+    default: ""
 outputs:
   exit-code:
     description: Exit code of the harness command.
@@ -48,12 +59,33 @@ runs:
         EMI_SMTP_PASSWORD: ${{ inputs.password }}
       run: python -m emi_test_broker start
 
+    - name: Download the earlier jobs' results
+      if: inputs.previous != ''
+      uses: actions/download-artifact@v4
+      with:
+        pattern: ${{ inputs.previous }}
+        path: .emi-previous
+
+    # Relative paths only: in Git Bash on Windows a backslash runner path would be read as escapes.
+    - name: Put the earlier jobs' results in place
+      if: inputs.previous != ''
+      shell: bash
+      run: |
+        : > .emi-previous/copied.txt
+        for job in .emi-previous/*/reports/*/*/; do
+          relative="${job#.emi-previous/*/}"
+          mkdir -p "$relative" && cp -R "$job". "$relative"
+          echo "$relative" >> .emi-previous/copied.txt
+        done
+        cat .emi-previous/copied.txt
+
     - name: Run the harness
       id: run
       shell: bash
       env:
         EMI_IMAP_PASSWORD: ${{ inputs.password }}
         EMI_SMTP_PASSWORD: ${{ inputs.password }}
+        EMI_RUN_ID: ${{ inputs.run-id }}
         HARNESS_COMMAND: ${{ inputs.command }}
       run: |
         set +e
@@ -64,6 +96,14 @@ runs:
           code=0
         fi
         echo "exit-code=$code" >> "$GITHUB_OUTPUT"
+
+    - name: Remove the earlier jobs' results
+      if: always() && inputs.previous != ''
+      shell: bash
+      run: |
+        if [ -f .emi-previous/copied.txt ]; then
+          while read -r relative; do [ -n "$relative" ] && rm -rf "$relative"; done < .emi-previous/copied.txt
+        fi
 
     - name: Stop the test broker
       if: always()

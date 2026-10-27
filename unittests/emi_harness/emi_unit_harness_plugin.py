@@ -101,6 +101,39 @@ class TestEMIHarnessPlugin:
         assert outcomes["C400012"].primary == ReaderKeyword.IMAP_CONNECTION_REFUSED
         result.stdout.fnmatch_lines([f"*JOB STOPPED: {ReaderKeyword.IMAP_CONNECTION_REFUSED}*"])
 
+    def EMI_HARNESS_UNIT_200109_p0_failure_skips_only_dependents(self, project: pytest.Pytester) -> None:
+        """A failed P0 test does not stop the P0 job; in the later P1 job only its dependents are skipped."""
+        _functional(project, """
+    @pytest.mark.emi(priority="P0")
+    def EMI_DEMO_FUNC_400061_parent(self) -> None:
+        assert 1 == 2
+
+    @pytest.mark.emi(priority="P0")
+    def EMI_DEMO_FUNC_400062_other_p0(self) -> None:
+        assert True
+
+    @pytest.mark.emi(priority="P1", depends=["C400061"])
+    def EMI_DEMO_FUNC_400063_child(self) -> None:
+        assert True
+
+    @pytest.mark.emi(priority="P1")
+    def EMI_DEMO_FUNC_400064_independent(self) -> None:
+        assert True
+
+    @pytest.mark.emi(priority="P2")
+    @pytest.mark.parametrize("number", [pytest.param(number, marks=pytest.mark.emi(case=f"C4001{number:02d}"))
+                                        for number in range(16)])
+    def EMI_DEMO_FUNC_400100_filler(self, number: int) -> None:
+        assert number >= 0
+""")
+        first, _outcomes = _run(project, "--emi-job", "P0")
+        first.assert_outcomes(passed=1, failed=1)
+        second, outcomes = _run(project, "--emi-job", "P1")
+        second.assert_outcomes(passed=1, skipped=1)
+        assert outcomes["C400062"].status is Status.PASSED
+        assert outcomes["C400063"].primary == CaseKeyword.DEPENDENCY_SKIPPED
+        assert outcomes["C400064"].status is Status.PASSED
+
     def EMI_HARNESS_UNIT_200102_dependency_skip_and_order(self, project: pytest.Pytester) -> None:
         """A child written before its parent runs after it, and is skipped when the parent fails."""
         _functional(project, """
@@ -238,13 +271,30 @@ class TestEMIHarnessCli:
         assert not calls
 
     def EMI_HARNESS_UNIT_200112_upstream_abort(self, reports: Path, capsys: pytest.CaptureFixture[str]) -> None:
-        """When P0 aborted, P1 and P2-P4 do not run (exit 2)."""
+        """When P0 aborted (infrastructure), P1 and P2-P4 do not run (exit 2)."""
         controller = JobController(Job.P0, stop_dir=job_dir(reports, _RUN_ID, "P0"))
-        controller.record(_outcome("C400001", "P0", Status.FAILED, "P0"))
+        controller.record(TestOutcome(nodeid="tests/emi_func_demo.py::C400001", case_id="C400001", priority="P0",
+                                      status=Status.SKIPPED, primary="GREENMAIL_NOT_READY", infrastructure=True))
         calls: list[list[str]] = []
         for job in ("P1", "P2-P4"):
             assert main(["--priority", job], runner=lambda args: calls.append(args) or 1) == EXIT_ABORTED
-        assert not calls and JobKeyword.CRITICAL_FUNCTIONAL_FAILURE in capsys.readouterr().err
+        assert not calls and "GREENMAIL_NOT_READY" in capsys.readouterr().err
+
+    def EMI_HARNESS_UNIT_200115_p0_failure_reported(self, reports: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        """A P0 failure fails the P0 job with JOB_CRITICAL_FUNCTIONAL_FAILURE, but P1 still runs (AMB-65)."""
+        def p0_runner(args: list[str]) -> int:
+            del args
+            writer = ResultsWriter(job_dir(reports, _RUN_ID, "P0"), "main")
+            writer.write(_outcome("C400001", "P0", Status.FAILED, "P0"))
+            writer.write(_outcome("C400002", "P0", Status.PASSED, "P0"))
+            return 1
+
+        assert main(["--priority", "P0"], runner=p0_runner) == EXIT_FAILED
+        error = capsys.readouterr().err
+        assert f"{JobKeyword.CRITICAL_FUNCTIONAL_FAILURE}: P0 test(s) not passed: C400001 " in error
+        calls: list[list[str]] = []
+        assert main(["--priority", "P1"], runner=lambda args: calls.append(args) or 0) == EXIT_PASSED
+        assert len(calls) == 1
 
     @pytest.mark.parametrize(("job", "failed", "expected"), [("P1", 0, EXIT_PASSED), ("P1", 1, EXIT_FAILED),
                                                              ("P2-P4", 1, EXIT_PASSED), ("P2-P4", 2, EXIT_FAILED)])

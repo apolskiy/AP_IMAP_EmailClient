@@ -38,14 +38,16 @@ older waiting runs, so a quick series of merges could leave some merges untested
 
 The jobs run in this order. `lint` and `unit` must **pass** before anything after them starts. The
 functional jobs then run as a chain, **P0 → P1 → P2–P4**: each starts when the previous one has
-finished, and the chain stops only if a job **aborts** (an infrastructure failure, any P0 failure, or
-the circuit breaker). A job that finishes with failures but did not abort lets the next one run.
+finished, and the chain stops only if a job **aborts** (an infrastructure failure, the circuit breaker,
+or the job's time budget). A job that finishes with failures, P0 failures included, lets the next one
+run. Only the dependents of a failed test are skipped, in its own job and in the later ones: the three
+jobs share one run ID, and each later job first gets the earlier jobs' results.
 
 | # | Job | Runs on | Blocking | What it does |
 |---|---|---|---|---|
 | 1 | `lint` | Ubuntu | **Yes** | `pylint --rcfile=.pylintrc` across all modules; must score **10.00/10**. |
 | 2 | `unit` | Windows + Ubuntu | **Yes** (mandatory gate) | Every unit-test folder: `unittests/emi_reader/`, `unittests/emi_sender/`, `unittests/emi_test_broker/`, `unittests/emi_greenmail/`, `unittests/emi_harness/`, `unittests/emi_api/`. All must pass; otherwise no functional job starts. |
-| 3 | `functional-p0` | Windows + Ubuntu (see below) | **Yes** | Starts Greenmail and `emi_test_broker`, then runs the P0 (critical) tests. **100%** must pass; a skip is not a pass. **Any P0 failure aborts the job** (`JOB_CRITICAL_FUNCTIONAL_FAILURE`) and stops the chain. |
+| 3 | `functional-p0` | Windows + Ubuntu (see below) | **Yes** | Starts Greenmail and `emi_test_broker`, then runs the P0 (critical) tests. **100%** must pass; a skip is not a pass. **Any P0 failure is a critical failure** (`JOB_CRITICAL_FUNCTIONAL_FAILURE`): the job fails but finishes its other tests, P1 and P2–P4 still run, and only the failed test's dependents are skipped. |
 | 4 | `functional-p1` | same as P0 | **Yes** | P1 (high-priority) tests, after P0. **100%** must pass; failures are isolated unless the job aborts. |
 | 5 | `functional-p2-p4` | same as P0 | **Yes** | P2–P4 tests, after P1. Together **≥ 85%** must pass. |
 | 6 | `quality-gate` | Ubuntu | **Yes** | Reads all functional results. Fails if P0 or P1 < 100%, or P2–P4 < 85% (then nothing else is measured), or overall passed / all functional < **95%**. Prints a keyword summary table and the effective P2–P4 floor. |

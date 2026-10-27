@@ -1,9 +1,11 @@
 # SPDX-FileCopyrightText: 2026 Aleksandr Polskiy
 # SPDX-License-Identifier: Apache-2.0
 # The functional chain of one operating system: P0 -> P1 -> P2-P4 (design §12, framework rules §1).
-# Each job has its own runner and Greenmail. The chain stops only when a job aborts: any P0 failure
-# aborts (JOB_CRITICAL_FUNCTIONAL_FAILURE), so P1 needs P0 passed; P2-P4 runs after P1 unless P1 aborted
-# (exit 2) or never produced an exit code (setup failed).
+# Each job has its own runner and Greenmail. A failed test never stops a job or the chain (AMB-65): a P0
+# failure fails the P0 job (JOB_CRITICAL_FUNCTIONAL_FAILURE), and only the dependents of failed tests are
+# skipped, in every job. The three jobs share one run ID, and each later job first gets the earlier jobs'
+# results, which is how a P1 or P2-P4 test learns that its parent failed. The chain stops only when a job
+# aborts (exit 2: infrastructure, circuit breaker, time budget) or never produced an exit code.
 name: functional-chain
 
 on:
@@ -30,17 +32,28 @@ jobs:
   functional-p0:
     runs-on: ${{ inputs.os }}
     timeout-minutes: 20
+    outputs:
+      exit-code: ${{ steps.job.outputs.exit-code }}
+      run-id: ${{ steps.run-id.outputs.run-id }}
     steps:
       - uses: actions/checkout@v5
-      - uses: ./.github/actions/harness-job
+      - name: Choose the chain's run ID
+        id: run-id
+        shell: bash
+        run: echo "run-id=$(date -u +%Y%m%dt%H%M%S)-w00-$(printf '%04x' "$RANDOM")" >> "$GITHUB_OUTPUT"
+      - id: job
+        uses: ./.github/actions/harness-job
         with:
           command: emi_harness.cli --priority P0 --allure -n ${{ inputs.workers }}
           artifact: reports-${{ inputs.label }}-p0
+          run-id: ${{ steps.run-id.outputs.run-id }}
           password: ${{ secrets.EMI_GREENMAIL_PASSWORD || 'password' }}
 
   functional-p1:
     needs: functional-p0
-    if: ${{ !cancelled() && needs.functional-p0.result == 'success' }}
+    if: >-
+      ${{ !cancelled() && needs.functional-p0.outputs.exit-code != ''
+      && needs.functional-p0.outputs.exit-code != '2' }}
     runs-on: ${{ inputs.os }}
     timeout-minutes: 20
     outputs:
@@ -52,10 +65,12 @@ jobs:
         with:
           command: emi_harness.cli --priority P1 --allure -n ${{ inputs.workers }}
           artifact: reports-${{ inputs.label }}-p1
+          run-id: ${{ needs.functional-p0.outputs.run-id }}
+          previous: reports-${{ inputs.label }}-p0
           password: ${{ secrets.EMI_GREENMAIL_PASSWORD || 'password' }}
 
   functional-p2-p4:
-    needs: functional-p1
+    needs: [functional-p0, functional-p1]
     if: >-
       ${{ !cancelled() && needs.functional-p1.result != 'skipped'
       && needs.functional-p1.outputs.exit-code != '' && needs.functional-p1.outputs.exit-code != '2' }}
@@ -67,4 +82,6 @@ jobs:
         with:
           command: emi_harness.cli --priority P2-P4 --allure -n ${{ inputs.workers }}
           artifact: reports-${{ inputs.label }}-p2-p4
+          run-id: ${{ needs.functional-p0.outputs.run-id }}
+          previous: reports-${{ inputs.label }}-p[01]
           password: ${{ secrets.EMI_GREENMAIL_PASSWORD || 'password' }}

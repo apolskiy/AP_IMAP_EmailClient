@@ -44,6 +44,7 @@ live in `docs/design/phase0_email_client_ambiguities.md`; this log records when 
 | 2026-10-26 | Functional suite of 1,016 cases: every parametrized case is its own TestRail case through a per-parameter `emi(case=...)` marker; a test needing several addresses uses address slots `<run>-rNN` of its own case, so no two tests share an address | Design §4, §13.3 |
 | 2026-10-26 | Test validity: named faults as backend wrappers prove each functional test can fail for the right reason; stability repeats find flaky tests and thin timing margins; `CASE_NO_VERIFICATION` for a test that checks nothing; non-blocking `test-validity` job | AMB-64 |
 | 2026-10-26 | CI: one reusable functional chain called per OS, so each OS keeps its own P0 → P1 → P2-P4 order; the harness exit code (2 = abort) decides whether the chain goes on; Greenmail started by one composite action on both OSes | Design §12 |
+| 2026-10-26 | A P0 failure stays critical but stops nothing: the P0 job finishes, P1 and P2-P4 run, only dependents are skipped; the CI chain shares one run ID and passes earlier jobs' results on, so dependents in later jobs are skipped too | AMB-65 |
 
 ## Pylint scores
 

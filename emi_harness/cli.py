@@ -12,9 +12,11 @@ python -m emi_harness.cli --priority P0 -n 4           # one job, 4 workers
 Every ``--emi-*`` option is passed to pytest unchanged. Reports go to ``reports/<run>/<job>/`` (JUnit XML,
 HTML, results, Allure results with ``--allure``).
 
-Exit codes: 0 the job passed; 1 the job failed (P0/P1: any test not passed; P2-P4: under 85% passed;
-debug/all: pytest's verdict); 2 the job stopped early (abort), or an earlier job of the cascade aborted;
-4 usage error; 5 no tests selected.
+Exit codes: 0 the job passed; 1 the job failed (P0/P1: any test not passed, a P0 failure also printed as
+JOB_CRITICAL_FUNCTIONAL_FAILURE; P2-P4: under 85% passed; debug/all: pytest's verdict); 2 the job stopped
+early (abort: infrastructure, circuit breaker or time budget), or an earlier job of the run aborted;
+4 usage error; 5 no tests selected. A failed test never stops a job: its dependents are skipped instead,
+in this job and in later jobs of the same run (AMB-65).
 """
 
 import argparse
@@ -29,6 +31,7 @@ import pytest
 
 from emi_api import RunId
 from emi_harness.jobs import read_stop
+from emi_harness.keywords import JobKeyword
 from emi_harness.options import add_arguments, cli_values, pass_through, read_dotenv, resolve
 from emi_harness.priorities import LOW_GATE, Job
 from emi_harness.results import job_dir, load_results
@@ -75,6 +78,10 @@ def _job_exit(directory: Path, job: Job, pytest_code: int) -> int:
     if pytest_code not in (0, 1):
         return pytest_code
     results = {outcome.nodeid: outcome for outcome in load_results(directory)}.values()
+    failed = [outcome.case_id or outcome.nodeid for outcome in results if not outcome.passed]
+    if job is Job.P0 and failed:
+        print(f"{JobKeyword.CRITICAL_FUNCTIONAL_FAILURE}: P0 test(s) not passed: {', '.join(failed)} "
+              "(the job finished; only their dependents were skipped)", file=sys.stderr)
     if job in (Job.P0, Job.P1):
         return EXIT_PASSED if all(outcome.passed for outcome in results) else EXIT_FAILED
     if job is Job.P2_P4:

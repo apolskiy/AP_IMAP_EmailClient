@@ -284,8 +284,9 @@ user `qa` with the public password `password`, so nothing needs configuring. To 
 * **P0 and P1** are must-pass tests that prove core functionality. **P0 tests are the critical
   tests; P1 tests are the high-priority tests.** Together they may be at most **20% of all tests**
   and use at most **20% of the run time**.
-* **Any P0 failure** is a critical failure (`JOB_CRITICAL_FUNCTIONAL_FAILURE`): the P0 job stops and
-  P1 and P2–P4 do not run.
+* **Any P0 failure** is a critical failure (`JOB_CRITICAL_FUNCTIONAL_FAILURE`): the P0 job fails and
+  so does the project status, but nothing stops. The P0 job finishes its other tests, P1 and P2–P4
+  still run, and only the tests that depend on the failed one are skipped, in every job.
 * **Too many P0/P1 tests:** the harness automatically moves the excess **P1** tests to **P2** for
   that run, logs each move (`JOB_PRIORITY_DOWNGRADED`) and suggests a permanent re-label. P0 tests are
   never moved; if P0 alone exceeds 20%, the run stops with `JOB_PRIORITY_P0_OVERFLOW`.
@@ -293,7 +294,7 @@ user `qa` with the public password `password`, so nothing needs configuring. To 
   as a skip with the keyword that caused it.
 * **Stopping early:** an environment failure (server or service unreachable, network fault that
   retries did not fix) stops any job. In P2–P4 and debug runs, 5 failures in a row with the same
-  keyword stop the job (`JOB_CIRCUIT_BREAKER_OPEN`). Other failures (P1, P2–P4) do not stop a job.
+  keyword stop the job (`JOB_CIRCUIT_BREAKER_OPEN`). Other test failures never stop a job.
 * **Order:** if pylint or the unit tests fail, nothing else runs. Functional jobs run P0 → P1 →
   P2–P4; if the P0 or P1 job aborts, the lower-priority jobs do not run.
 * **Inside a test:** a failing step fails the test, the remaining steps are skipped, and cleanup always runs.
@@ -310,7 +311,8 @@ from GitHub (*Actions → Run workflow*). Full details, with local commands for 
 2. `unit`: the unit tests of every tool, the harness and the central API, on Windows and Ubuntu.
    If any fail, no functional tests run.
 3. `functional-p0` → `functional-p1` → `functional-p2-p4`, one after another: each starts
-   Greenmail and the EMI test broker, then runs its tests. If a job aborts, the ones after it do not run.
+   Greenmail and the EMI test broker, then runs its tests. If a job aborts (environment failure,
+   circuit breaker, time budget), the ones after it do not run; test failures alone never stop the chain.
 4. `quality-gate`: P0 and P1 must pass 100% (a skip is not a pass), P2–P4 together at least 85%,
    and all functional tests together at least 95%.
 

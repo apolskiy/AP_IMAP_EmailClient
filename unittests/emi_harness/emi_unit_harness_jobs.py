@@ -32,12 +32,12 @@ class TestEMIHarnessJobs:
         other_worker = JobController(Job.P1, stop_dir=tmp_path)
         assert other_worker.stopped() == read_stop(tmp_path) and read_stop(tmp_path) is not None
 
-    def EMI_HARNESS_UNIT_200021_p0_failure_is_critical(self) -> None:
-        """Any P0 failure aborts with JOB_CRITICAL_FUNCTIONAL_FAILURE."""
+    def EMI_HARNESS_UNIT_200021_p0_failure_does_not_stop(self) -> None:
+        """P0 failures never stop the P0 job (AMB-65): the other P0 tests still run."""
         controller = JobController(Job.P0)
-        decision = controller.record(_outcome(400001, Status.FAILED, priority="P0", primary="CASE_LINK_NOT_FOUND"))
-        assert decision is not None and decision.primary == JobKeyword.CRITICAL_FUNCTIONAL_FAILURE
-        assert decision.secondary == ("CASE_LINK_NOT_FOUND",)
+        for number in range(400001, 400011):
+            assert controller.record(_outcome(number, Status.FAILED, priority="P0", primary="CASE_X")) is None
+        assert controller.stopped() is None
 
     def EMI_HARNESS_UNIT_200022_p1_failures_isolated(self) -> None:
         """P1 failures never stop the P1 job (no circuit breaker there)."""

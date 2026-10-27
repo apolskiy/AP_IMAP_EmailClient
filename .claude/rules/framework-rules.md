@@ -19,7 +19,8 @@ changes do not trigger CI. **Every CI job can also be started manually** at any 
    **chain: P0 → P1 → P2-P4**. Each job runs after the previous one finishes; the chain stops only when a
    job **aborts** (failures without an abort do not stop it). A skip is **not** a pass in any of the rules below.
    * `P0`: **Critical** tests. **100% must pass.** Every P0 failure is a critical functional failure
-     (`JOB_CRITICAL_FUNCTIONAL_FAILURE`): the P0 job aborts and P1 and P2-P4 do not run.
+     (`JOB_CRITICAL_FUNCTIONAL_FAILURE`) and fails the P0 job, but stops nothing: the P0 job finishes,
+     P1 and P2-P4 still run, and only the failed test's dependents are skipped, in P0, P1 and P2-P4.
    * `P1`: **High** priority tests. **100% must pass**; any failure or skip fails the job. Failures are
      isolated (the job continues) unless it aborts on an infrastructure failure.
    * `P2-P4`: Standard and Low priority tests. Together they must reach **at least 85%** pass, otherwise

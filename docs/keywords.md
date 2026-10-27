@@ -117,7 +117,7 @@ remaining tests skipped. **info**: secondary keyword only; it never decides the 
 
 | Keyword | Meaning | Outcome |
 |---|---|---|
-| `JOB_CRITICAL_FUNCTIONAL_FAILURE` | A P0 test failed | abort the P0 job; P1 and P2–P4 do not run |
+| `JOB_CRITICAL_FUNCTIONAL_FAILURE` | A P0 test failed | the P0 job fails (exit 1) but finishes; P1 and P2–P4 still run; only the failed test's dependents are skipped (AMB-65) |
 | `JOB_CIRCUIT_BREAKER_OPEN` | 5 failures in a row with the same primary keyword (P2–P4, debug) | abort; remaining tests skipped |
 | `JOB_PRIORITY_DOWNGRADED` | A P1 test moved to P2 for this run (P0 + P1 over 20%) | info |
 | `JOB_PRIORITY_P0_OVERFLOW` | P0 alone over 20% of tests | collection fails |

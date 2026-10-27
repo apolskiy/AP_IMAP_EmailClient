@@ -442,20 +442,25 @@ Every non-pass carries one **primary** keyword and any **secondary** keywords (c
 There is no "not run" state: a test not executed because of an environment problem, an abort or the
 circuit breaker is a **SKIP** with the triggering keyword and step number. **A skip is never a pass.**
 
-### 9.4 Failing fast (AMB-44, AMB-49, AMB-59)
+### 9.4 Failing fast (AMB-44, AMB-49, AMB-59, AMB-65)
 * **Infrastructure failure stops any job**: a failed PRE step (server or service unreachable, port not
   open) or a network fault that retries did not cure; remaining tests → SKIP.
-* **Critical functional failure**: every P0 test is critical; any P0 failure raises
-  `JOB_CRITICAL_FUNCTIONAL_FAILURE` and aborts the P0 job.
-* **Ordinary functional failures** are isolated (the job continues), including in P1.
+* **Critical functional failure** (AMB-65): every P0 test is critical; a P0 failure is
+  `JOB_CRITICAL_FUNCTIONAL_FAILURE` and fails the P0 job (and so the project status), but **does not
+  stop it**. The P0 job finishes its other tests, and P1 and P2–P4 still run. Only the dependents of the
+  failed test are skipped (§9.5), in P0, P1 and P2–P4.
+* **Functional failures** are isolated (the job continues) in every job.
 * **Circuit breaker** (P2–P4 and debug runs): 5 failures in a row with the **same** primary keyword →
   `JOB_CIRCUIT_BREAKER_OPEN` + that keyword; a pass or a different keyword resets the count.
-* **Abort cascade**: lint or unit failure → nothing after runs; P0 or P1 job abort → lower jobs do not run.
+* **Abort cascade**: lint or unit failure → nothing after runs; P0 or P1 job **abort** (infrastructure,
+  circuit breaker, time budget) → lower jobs do not run. Test failures alone never stop the chain.
 
-### 9.5 Dependencies (framework-rules §6, AMB-27)
+### 9.5 Dependencies (framework-rules §6, AMB-27, AMB-65)
 A failed **or skipped** parent skips its dependents, transitively down the chain (a parent runs under the
 same or milder conditions than its children). Each dependent's skip carries `CASE_DEPENDENCY_SKIPPED`
-and names the test at the top of the chain and its keyword.
+and names the test at the top of the chain and its keyword. A parent's result counts in its own job and
+in every later job of the same run: the jobs share the run ID and read the earlier jobs' results from
+`reports/<run>/`. In CI each job gets the earlier jobs' results of its chain before it runs.
 
 ### 9.6 Session setup and probe email (AMB-26, AMB-42, AMB-53)
 Before any test: (1) Greenmail readiness and port probes; (2) test broker health (auto-start in service
@@ -541,7 +546,9 @@ User-facing details: `docs/ci_jobs.md`. Rule source: `.claude/rules/framework-ru
   2. `unit` (Windows + Ubuntu): every unit-test folder, including the network-fault layers 1 and 2 (§13).
      Mandatory gate.
   3. `functional-p0` → `functional-p1` → `functional-p2-p4`, a chain **per OS** (Windows and Ubuntu side
-     by side; both must pass). The chain stops only when a job aborts.
+     by side; both must pass). The chain stops only when a job aborts; test failures, P0 included, do
+     not stop it (AMB-65). The three jobs share one run ID (chosen by P0), and P1 and P2–P4 first get
+     the earlier jobs' results, so dependents of a failed parent are skipped in later jobs too.
   4. `quality-gate` (Ubuntu): the gates of §9.7 over both OSes' results; builds the Allure report once.
 * **Functional job steps**: checkout → `actions/setup-python` (3.14) → `pip install -r requirements.txt
   -r requirements-dev.txt` → start Greenmail → readiness poll → start `emi_test_broker` → session setup
