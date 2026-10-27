@@ -41,6 +41,7 @@ live in `docs/design/phase0_email_client_ambiguities.md`; this log records when 
 | 2026-10-26 | New keywords: `CASE_VERIFICATION_FAILED` (false check or plain `assert`), `CASE_UNEXPECTED_ERROR` (untyped exception, class as secondary), `HARNESS_DUPLICATE_TEST_ID` (collection stops) | `docs/keywords.md` |
 | 2026-10-26 | `EmiError` is a tuple of the tools' error bases: tools cannot import `emi_api`, and `except` ignores ABC virtual subclasses | Design §8.2 |
 | 2026-10-26 | Sender always serializes with CRLF (`policy.SMTP`) so SMTP dot-stuffing cannot corrupt links; `max-line-length` 120 | Spike Evidence |
+| 2026-10-26 | Functional suite of 1,016 cases: every parametrized case is its own TestRail case through a per-parameter `emi(case=...)` marker; a test needing several addresses uses address slots `<run>-rNN` of its own case, so no two tests share an address | Design §4, §13.3 |
 
 ## Pylint scores
 
@@ -54,3 +55,4 @@ live in `docs/design/phase0_email_client_ambiguities.md`; this log records when 
 | 2026-10-26 | all tools incl. `emi_api`, `unittests` (257 unit tests pass, no pylint messages) | **10.00/10** |
 | 2026-10-26 | all tools, `unittests`, after AMB-63 (272 unit tests pass, no pylint messages) | **10.00/10** |
 | 2026-10-26 | all tools incl. `emi_harness`, `unittests`, `tests`, `conftest.py` (348 unit tests pass, no pylint messages) | **10.00/10** |
+| 2026-10-26 | all tools, `unittests`, `tests` with the 1,016-case functional suite, `conftest.py` (365 unit tests pass, no pylint messages) | **10.00/10** |

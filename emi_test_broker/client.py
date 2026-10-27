@@ -301,6 +301,7 @@ class BrokerClient:
     def wait_for_emails(  # pylint: disable=too-many-arguments
         self, address: str, *, cta: Cta | None = None, count: int = 1, timeout: float = 60.0,
         test_id: str | None = None, run_id: str | None = None, match_fields: tuple[str, ...] | None = None,
+        settle_window: float | None = None,
     ) -> list[ReceivedEmail]:
         """Wait until exactly ``count`` matching emails are present.
 
@@ -312,13 +313,15 @@ class BrokerClient:
             test_id: Required test marker.
             run_id: Required run marker.
             match_fields: Recipient fields the address must appear in; ``To`` only by default.
+            settle_window: Seconds to watch for extra emails after ``count`` arrived; the reader's default
+                (2 s) when None; 0 for mail delivered before the wait.
 
         Returns:
             The emails, oldest first.
         """
         payload = {"address": address, "cta": cta_to_json(cta), "mode": "emails", "count": count,
                    "timeout": timeout, "test_id": test_id, "run_id": run_id,
-                   "match_fields": _fields(match_fields)}
+                   "match_fields": _fields(match_fields), "settle_window": settle_window}
         answer = self._post("/wait", payload, timeout + _CALL_MARGIN_SEC)
         return [received_from_json(item) for item in answer["emails"]]
 

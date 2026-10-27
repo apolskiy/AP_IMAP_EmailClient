@@ -159,6 +159,35 @@ class TestEMIHarnessPlugin:
         assert result.ret == pytest.ExitCode.USAGE_ERROR
         result.stderr.fnmatch_lines([f"*{HarnessKeyword.DUPLICATE_TEST_ID}*", "*400051_first*400051_second*"])
 
+    def EMI_HARNESS_UNIT_200107_parametrized_cases_own_ids(self, project: pytest.Pytester) -> None:
+        """Each parametrized case takes its case ID from its own marker; function and class markers fill the
+        rest (priority, depends), and a case marker overrides them."""
+        _functional(project, """
+    @pytest.mark.emi(priority="P3")
+    @pytest.mark.parametrize("value", [
+        pytest.param(1, marks=pytest.mark.emi(case="C401001")),
+        pytest.param(2, marks=pytest.mark.emi(case="C401002", priority="P2")),
+    ])
+    def EMI_DEMO_FUNC_401000_family(self, value: int) -> None:
+        assert value != 2
+""")
+        result, outcomes = _run(project, "--emi-test", "C401002")
+        result.assert_outcomes(failed=1, deselected=1)
+        assert outcomes["C401002"].priority == "P2"
+        result, outcomes = _run(project)
+        assert outcomes["C401001"].priority == "P3" and outcomes["C401001"].passed
+
+    def EMI_HARNESS_UNIT_200108_parametrized_without_ids_refused(self, project: pytest.Pytester) -> None:
+        """Cases that share the function's ID are duplicates: collection stops."""
+        _functional(project, """
+    @pytest.mark.parametrize("value", [1, 2])
+    def EMI_DEMO_FUNC_401100_family(self, value: int) -> None:
+        assert value
+""")
+        result, _outcomes = _run(project)
+        assert result.ret == pytest.ExitCode.USAGE_ERROR
+        result.stderr.fnmatch_lines([f"*{HarnessKeyword.DUPLICATE_TEST_ID}*", "*C401100*"])
+
     def EMI_HARNESS_UNIT_200106_unit_tests_untouched(self, project: pytest.Pytester) -> None:
         """Tests outside tests/ run as plain pytest: no results and no report folders."""
         project.makepyfile(**{"unit/emi_unit_demo": """

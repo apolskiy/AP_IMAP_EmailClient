@@ -235,6 +235,7 @@ class ReaderApi:
     def wait_for_emails(  # pylint: disable=too-many-arguments
         self, address: str, cta: Cta | None = None, count: int = 1, timeout: float | None = None, *,
         test_id: str | None = None, run_id: str | None = None, match_fields: tuple[str, ...] | None = None,
+        settle_window: float | None = None,
     ) -> list[ReceivedEmail]:
         """Wait until exactly ``count`` matching emails are present.
 
@@ -246,13 +247,16 @@ class ReaderApi:
             test_id: Also require this test marker.
             run_id: Also require this run marker.
             match_fields: Recipient fields the address must appear in; ``To`` only by default.
+            settle_window: Seconds to watch for extra emails after ``count`` arrived; the reader's default
+                (2 s) when None; 0 for mail delivered before the wait.
 
         Returns:
             The emails, oldest first.
         """
         return self._backend.wait_for_emails(address, cta=cta, count=count,
                                              timeout=timeout or self._default_timeout, test_id=test_id,
-                                             run_id=run_id, match_fields=match_fields)
+                                             run_id=run_id, match_fields=match_fields,
+                                             settle_window=settle_window)
 
 
 class EmiApi:  # pylint: disable=too-many-instance-attributes

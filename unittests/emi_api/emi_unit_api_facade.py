@@ -95,6 +95,14 @@ class TestEMIApiInprocess:
         fields = [wait["match_fields"] for wait in mailboxes.built[0].waits]
         assert fields == [("cc",), ("bcc", "delivered-to"), None]
 
+    def EMI_API_UNIT_300062_settle_window_passed_through(self, tmp_path: Path) -> None:
+        """api.reader.wait_for_emails passes the settle window through; None keeps the reader's default."""
+        api, mailboxes, _sender = _inprocess(tmp_path)
+        run = api.start_run("400001")
+        api.reader.wait_for_emails(run.address(), count=2, settle_window=0.0)
+        api.reader.wait_for_emails(run.address())
+        assert [wait["settle_window"] for wait in mailboxes.built[0].waits] == [0.0, None]
+
     def EMI_API_UNIT_300041_wait_for_link_default_timeout(self, tmp_path: Path) -> None:
         """Waits use the settings' wait timeout unless given one."""
         api, mailboxes, _sender = _inprocess(tmp_path)

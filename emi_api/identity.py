@@ -26,6 +26,7 @@ _RUN_ID = re.compile(r"^(?P<stamp>\d{8}t\d{6})-w(?P<worker>\d{2,})-(?P<token>[0-
 _ADDRESS = re.compile(r"^(?P<base>[a-z0-9.]+)\+(?P<test>c\d{6,})_(?P<run>[a-z0-9_-]+)@(?P<domain>.+)$",
                       re.IGNORECASE)
 _MAX_LOCAL_PART = 64
+_MAX_SLOT = 99
 
 
 @dataclass(frozen=True)
@@ -205,13 +206,38 @@ class EmiRun:
         object.__setattr__(self, "test_id", case_id(self.test_id))
         self.address()
 
-    def address(self) -> str:
-        """The test's own address.
+    def address(self, slot: int = 0) -> str:
+        """The test's own address, or one of its extra recipient addresses.
+
+        A test that needs several recipients (a batch spread over 5 or 10 addresses) uses slots 1 to 99:
+        ``qa+C400001_<run id>-r01@...``. Every slot keeps the test's case ID and run, so other tests and runs
+        never see its mail.
+
+        Args:
+            slot: 0 for the test's own address; 1 to 99 for extra recipients.
 
         Returns:
-            ``qa+C<number>_<run id>@example.com``.
+            ``qa+C<number>_<run id>@example.com`` (slot 0) or ``qa+C<number>_<run id>-rNN@example.com``.
+
+        Raises:
+            AddressInvalidError: ``API_ADDRESS_INVALID`` for a slot outside 0 to 99.
         """
-        return build_address(self.test_id, self.run_id, self.base_mailbox)
+        if not 0 <= slot <= _MAX_SLOT:
+            raise AddressInvalidError(f"address slot must be 0-{_MAX_SLOT}, got {slot}", ApiKeyword.ADDRESS_INVALID,
+                                      details={"field": "slot", "value": slot})
+        run_part = self.run_id if slot == 0 else f"{self.run_id}-r{slot:02d}"
+        return build_address(self.test_id, run_part, self.base_mailbox)
+
+    def addresses(self, count: int) -> tuple[str, ...]:
+        """The test's first ``count`` extra recipient addresses (slots 1 to ``count``).
+
+        Args:
+            count: How many (1 to 99).
+
+        Returns:
+            The addresses, slot 1 first.
+        """
+        return tuple(self.address(slot) for slot in range(1, count + 1))
 
     @property
     def marker(self) -> Marker:

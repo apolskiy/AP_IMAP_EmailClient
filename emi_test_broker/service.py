@@ -143,7 +143,7 @@ class BrokerService:  # pylint: disable=too-many-instance-attributes
 
         Args:
             payload: ``{"address", "cta", "mode": "link"|"emails", "count", "timeout", "test_id", "run_id",
-                "match_fields"}``.
+                "match_fields", "settle_window"}``.
 
         Returns:
             ``{"link": ...}`` or ``{"emails": [...]}``, plus the accessibility matrix and retried attempts.
@@ -165,7 +165,8 @@ class BrokerService:  # pylint: disable=too-many-instance-attributes
                 if payload.get("mode", "link") == "emails":
                     found = mailbox.wait_for_emails(address, cta=cta, count=int(payload.get("count", 1)),
                                                     timeout=remaining, test_id=test_id, run_id=run_id,
-                                                    match_fields=match_fields)
+                                                    match_fields=match_fields,
+                                                    settle_window=payload.get("settle_window"))
                     result = {"emails": [received_to_json(item) for item in found]}
                 else:
                     if cta is None:

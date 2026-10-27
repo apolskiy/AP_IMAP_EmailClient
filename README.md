@@ -5,9 +5,9 @@ A Python library and test harness for end-to-end tests that wait for emails sent
 over IMAP, with many tests running in parallel against one shared mailbox.
 
 > **Status:** implementation in progress. The reader, sender, Greenmail client, test broker, central
-> API (`EmiApi`) and test harness are built, unit-tested and checked against Greenmail. The first five
-> functional tests exist; the 1,000+ test suite and the CI workflows are next. Commands below marked
-> *(planned)* describe the intended interface and do not exist yet.
+> API (`EmiApi`) and test harness are built, unit-tested and checked against Greenmail, and the
+> functional suite has 1,016 test cases. The CI workflows are next. What is built and what is not yet is
+> tracked in [docs/rtm.md](docs/rtm.md).
 
 ## Getting Started
 
@@ -178,6 +178,13 @@ python -m emi_harness.gate reports/<run>        # quality gates over a run's res
 Every `--emi-*` setting (`python -m emi_harness.cli --help`) can also be given as an `EMI_*`
 environment variable or in `.env`; a command-line value wins. Plain `python -m pytest tests` runs the
 same functional tests with the same `--emi-*` options.
+
+The functional suite (`tests/functional/`) has 1,016 test cases: delivery basics, counts per kind and
+recipient field, recipient fields not matched, markers, mail arriving during the wait, isolation from
+other tests' mail, and 864 batch cases (every distribution preset × send order × recipient field × kind
+mix × concurrency × seed). Each parametrized case is its own TestRail case, so `--test C410123` runs
+exactly one. The ID blocks are listed in `tests/functional/catalog.py`. Run one worker at a time and the
+whole suite takes about an hour against a local Greenmail; `-n 4` shortens it.
 
 Reports go to `reports/<run>/<job>/`: `junit.xml`, `report.html`, `results-<worker>.jsonl` (one line
 per test with its keywords and step log), `settings.json` (every setting with its source, passwords

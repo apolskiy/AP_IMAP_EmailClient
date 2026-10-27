@@ -119,6 +119,14 @@ one each, but this project implements **one sender and one reader against one se
   at most 64 characters (RFC 5321); violations raise `API_ADDRESS_INVALID`. Non-ASCII input (e.g.
   Cyrillic, including a Cyrillic `С`) is rejected. The capital `C` is safe: Greenmail's `SEARCH TO` and
   the reader match recipients case-insensitively (Spike Evidence), and so does Gmail.
+* **Extra recipients of one test** (batches over 5 or 10 addresses): `EmiRun.address(slot)` with slot 1 to
+  99 gives `qa+C<number>_<run id>-rNN@example.com` (`addresses(n)` gives slots 1 to n). Every slot keeps the
+  test's case ID and run, so its mail stays the test's own; the local part grows by 4 characters (39 for the
+  example above).
+* **Parametrized tests**: each case is its own TestRail case and carries its ID in its own marker
+  (`pytest.param(..., marks=pytest.mark.emi(case="C410123"))`, built by `tests/functional/catalog.py`).
+  The case marker wins over the function's and the class's; cases sharing an ID stop collection with
+  `HARNESS_DUPLICATE_TEST_ID`.
 * **Marker** (sender-generated mail only): headers `X-EMI-Test-Id: C<number>` / `X-EMI-Run-Id`, and a last
   body line `EMI-Test: C<number> run=<run_id>` in both parts (in HTML a small `<p>` after the footer, never
   near the CTA). Bodies stay valid UTF-8. Real-application mail has no marker; the unique address alone
@@ -177,7 +185,9 @@ Details and server limits: §11.
   CTA are not errors, just not matches.
 * **Duplicates**: `wait_for_link` returns the newest match and logs `CASE_DUPLICATE_DELIVERY` when there
   are more. `wait_for_emails(count=N)` fails with `CASE_EMAIL_COUNT_EXCEEDED` if more than N match
-  within the **settle window** (default 2 s) after the N-th arrives.
+  within the **settle window** (default 2 s) after the N-th arrives. The window can be set per wait
+  (`settle_window=`); 0 suits mail fully delivered before the wait starts (extras are then already
+  visible), which keeps a batch check over 10 addresses from costing 20 s.
 * **Deadline**: default wait **60 s** → `CASE_EMAIL_NOT_RECEIVED`, unless the last attempt failed on the
   network, in which case that network keyword is primary (an outage is never reported as "email missing").
 

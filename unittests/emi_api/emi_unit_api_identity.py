@@ -91,6 +91,19 @@ class TestEMIApiIdentity:
             build_address("C1000001", run_id)
         assert caught.value.details["length"] == 65
 
+    def EMI_API_UNIT_300017_address_slots(self) -> None:
+        """Extra recipient slots keep the case ID and run; slot 0 is the test's own address; 0-99 only."""
+        run = EmiRun("400001", _RUN)
+        assert run.address(0) == run.address() == f"qa+C400001_{_RUN}@example.com"
+        assert run.address(7) == f"qa+C400001_{_RUN}-r07@example.com"
+        assert run.addresses(3) == tuple(f"qa+C400001_{_RUN}-r0{slot}@example.com" for slot in (1, 2, 3))
+        assert len(set(run.addresses(99))) == 99 and run.address() not in run.addresses(99)
+        assert marker_for(run.address(5)) == Marker(test_id="C400001", run_id=f"{_RUN}-r05")
+        for slot in (-1, 100):
+            with pytest.raises(AddressInvalidError) as caught:
+                run.address(slot)
+            assert caught.value.primary == ApiKeyword.ADDRESS_INVALID
+
     def EMI_API_UNIT_300014_address_bad_base_mailbox(self) -> None:
         """A base mailbox without a domain is refused."""
         with pytest.raises(AddressInvalidError):

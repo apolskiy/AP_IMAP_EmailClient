@@ -148,6 +148,18 @@ class TestEMIReaderRecipientFields:
         with pytest.raises(EmailWaitError):
             mailbox.wait_for_emails(_ADDRESS, timeout=4.0)
 
+    def EMI_READER_UNIT_100117_settle_window_per_wait(self) -> None:
+        """settle_window=0 returns as soon as the count is met; the default keeps watching 2 s; negative refused."""
+        clock = SimClock()
+        server = SimImap(clock)
+        server.deliver("INBOX", make_email(to_addr=_ADDRESS))
+        mailbox = _mailbox(server, clock)
+        assert len(mailbox.wait_for_emails(_ADDRESS, settle_window=0.0)) == 1 and clock.now() == 0.0
+        mailbox.wait_for_emails(_ADDRESS)
+        assert clock.now() >= 2.0
+        with pytest.raises(ValueError, match="settle_window"):
+            mailbox.wait_for_emails(_ADDRESS, settle_window=-1.0)
+
     @pytest.mark.parametrize("fields", [(), ("reply-to",)])
     def EMI_READER_UNIT_100116_per_wait_fields_validated(self, fields: tuple[str, ...]) -> None:
         """Empty or unknown per-wait fields are refused before anything is searched."""

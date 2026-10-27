@@ -211,6 +211,7 @@ class Mailbox:
         test_id: str | None = None,
         run_id: str | None = None,
         match_fields: tuple[str, ...] | None = None,
+        settle_window: float | None = None,
     ) -> list[ReceivedEmail]:
         """Wait until exactly ``count`` matching emails are present.
 
@@ -223,6 +224,8 @@ class Mailbox:
             run_id: Required ``X-EMI-Run-Id`` marker.
             match_fields: Recipient fields for this wait (``to``, ``cc``, ``bcc``, ``delivered-to``,
                 ``x-original-to``); the mailbox's ``WaitOptions.match_fields`` by default.
+            settle_window: Seconds to keep watching for extra emails once ``count`` arrived; the mailbox's
+                ``WaitOptions.settle_window`` by default. 0 suits mail that was fully delivered before the wait.
 
         Returns:
             The matching emails, oldest first.
@@ -235,9 +238,12 @@ class Mailbox:
         """
         if count < 1:
             raise ValueError(f"count must be at least 1, got {count}")
+        settle = self._options.settle_window if settle_window is None else float(settle_window)
+        if settle < 0:
+            raise ValueError(f"settle_window must not be negative, got {settle}")
         target = _Target(address.strip().lower(), cta, test_id, run_id,
                          _match_fields(match_fields, self._options.match_fields))
-        found = self._wait(target, timeout, lambda matches: len(matches) >= count, settle=True)
+        found = self._wait(target, timeout, lambda matches: len(matches) >= count, settle=settle)
         if len(found) > count:
             raise EmailWaitError(
                 f"{len(found)} matching emails for {target.address}, expected {count}",
@@ -272,7 +278,7 @@ class Mailbox:
         """
         target = _Target(address.strip().lower(), cta, test_id, run_id,
                          _match_fields(match_fields, self._options.match_fields))
-        found = self._wait(target, timeout, lambda matches: len(matches) >= 1, settle=False)
+        found = self._wait(target, timeout, lambda matches: len(matches) >= 1, settle=0.0)
         if len(found) > 1:
             _LOGGER.warning("%s: %d emails for %s; using the newest",
                             ReaderCaseKeyword.DUPLICATE_DELIVERY, len(found), target.address)
@@ -287,9 +293,9 @@ class Mailbox:
         timeout: float,
         satisfied: Callable[[list[ReceivedEmail]], bool],
         *,
-        settle: bool,
+        settle: float,
     ) -> list[ReceivedEmail]:
-        """Poll until ``satisfied`` (plus the settle window), the deadline, or a fatal error."""
+        """Poll until ``satisfied`` (plus ``settle`` seconds), the deadline, or a fatal error."""
         deadline = self._clock() + timeout
         settle_until: float | None = None
         state: _WaitState | None = None
@@ -307,9 +313,9 @@ class Mailbox:
             found = sorted(state.matches.values(), key=lambda item: (item.folder, item.uid)) if state else []
             now = self._clock()
             if satisfied(found):
-                if not settle:
+                if settle <= 0:
                     return found
-                settle_until = settle_until if settle_until is not None else now + self._options.settle_window
+                settle_until = settle_until if settle_until is not None else now + settle
                 if now >= settle_until:
                     return found
             if now >= deadline:

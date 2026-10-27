@@ -154,9 +154,15 @@ def _functional(item: pytest.Item) -> bool:
 
 
 def _marker(item: pytest.Item) -> dict[str, Any]:
-    """The ``emi`` marker's keyword arguments."""
-    marker = item.get_closest_marker("emi")
-    return dict(marker.kwargs) if marker else {}
+    """The ``emi`` markers' keyword arguments, merged: a parametrized case's marker wins over the function's,
+    which wins over the class's (so each ``pytest.param`` can carry its own ``case`` ID)."""
+    merged: dict[str, Any] = {}
+    for marker in reversed(list(item.iter_markers("emi"))):
+        merged.update(marker.kwargs)
+    for marker in getattr(getattr(item, "callspec", None), "marks", ()):
+        if marker.name == "emi":
+            merged.update(marker.kwargs)
+    return merged
 
 
 # --- collection ------------------------------------------------------------------------------------------
