@@ -7,6 +7,8 @@ reasoning behind each decision is in [CLAUDE_LOG.md](CLAUDE_LOG.md).
 
 ## Unreleased
 
+## 6c56879 (2026-10-26)
+
 ### Added
 * **Mailbox inventory from every wait** (AMB-76). A report showed what a test found but not what else
   was in the mailbox, so a slow or crowded mailbox could not be told apart from a missing email, and
