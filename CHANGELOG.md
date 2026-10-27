@@ -7,6 +7,8 @@ reasoning behind each decision is in [CLAUDE_LOG.md](CLAUDE_LOG.md).
 
 ## Unreleased
 
+## a65e11a (2026-10-26)
+
 ### Changed
 * **README lists the features that are designed but not yet implemented.** A new section names each
   one (shared poll loop, a connection per worker in `inprocess` mode, several accounts, recipient field
