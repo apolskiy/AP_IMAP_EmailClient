@@ -37,7 +37,7 @@ from emi_harness.outcomes import CaseSkip, Status, TestOutcome, Verdict, classif
 from emi_harness.priorities import Job, Planned, parse_priority, plan_priorities
 from emi_harness.results import ResultsWriter, calibrate, job_dir, latest_run, load_results
 from emi_harness.selection import Candidate, case_id_for, duplicate_ids, read_test_file, select
-from emi_harness.session import session_setup
+from emi_harness.session import PROBE_CASE, session_setup
 from emi_harness.steps import StepHook, Steps
 
 _JOB_BUDGETS: dict[Job, float | None] = {Job.P0: 300.0, Job.P1: 600.0, Job.P2: 3600.0, Job.P3: 3600.0,
@@ -81,6 +81,7 @@ class HarnessState:  # pylint: disable=too-many-instance-attributes
     counts_asserts: bool = False
     allure: bool = False
     inventory: InventoryLog = field(default_factory=lambda: InventoryLog(Path("reports"), "main"))
+    session_evidence: list[tuple[str, Any]] = field(default_factory=list)
 
 
 _STATE = pytest.StashKey[HarnessState]()
@@ -332,22 +333,31 @@ def _api(pytestconfig: pytest.Config) -> Iterator[EmiApi]:
 def _observer(state: HarnessState) -> Callable[[str, Any], None]:
     """Attach the API's evidence to the running test; also log each wait's inventory (AMB-76).
 
-    An inventory belongs to the test its address names, so the session probe's wait, which runs while the
-    first test is being set up, is logged as the probe's and not attached to that test.
+    An item belongs to the test it names: a manifest by its test ID, an inventory by its address. The
+    session probe sends and waits while the first test is being set up, so its items are kept apart and
+    attached only to tests that session setup skipped, where they explain the skip.
     """
 
     def _observe(name: str, data: Any) -> None:
         current = state.current
-        if name == "inventory" and isinstance(data, dict):
-            marker = marker_for(str(data.get("address", "")))
-            owner = testrail_case(marker.test_id) if marker else (current.case_id if current else "")
-            if owner:
-                state.inventory.append(state.run_id, owner, data)
-            if current is None or owner != current.case_id:
-                return
-        if current is not None:
+        owner = _owner(name, data) or (current.case_id if current else "")
+        if name == "inventory" and isinstance(data, dict) and owner:
+            state.inventory.append(state.run_id, owner, data)
+        if owner == PROBE_CASE:
+            state.session_evidence.append((name, data))
+        elif current is not None and owner == current.case_id:
             current.evidence.add(name, data)
     return _observe
+
+
+def _owner(name: str, data: Any) -> str:
+    """The case an evidence item names (manifest: its test ID; inventory: its address), or ``""``."""
+    if not isinstance(data, dict):
+        return ""
+    if name == "manifest" and data.get("test_id"):
+        return testrail_case(str(data["test_id"]))
+    marker = marker_for(str(data.get("address", ""))) if name == "inventory" else None
+    return testrail_case(marker.test_id) if marker else ""
 
 
 @pytest.fixture(name="steps")
@@ -464,6 +474,9 @@ def _apply_error(item: pytest.Item, report: pytest.TestReport, info: ItemInfo, e
     info.verdict = verdict
     info.evidence.add_error(error)
     info.step = str(getattr(error, "step", "") or "")
+    if info.step == "SETUP":  # session setup failed: the probe's manifests and inventories explain why
+        for name, data in item.config.stash[_STATE].session_evidence:
+            info.evidence.add(name, data)
     detail = f"[{verdict.primary}]" + (f" step {info.step}" if info.step else "") + f" {verdict.message}"
     if verdict.secondary:
         detail += f" (secondary: {', '.join(verdict.secondary)})"

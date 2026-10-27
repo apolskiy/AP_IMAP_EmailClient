@@ -253,8 +253,8 @@ for pass/fail.
     already at the address.
   * **After**: the totals when the wait ends, and the categories of every email it saw.
   * **Category**: the first CTA found (`activation` for "Activate account", `invitation` for "Accept
-    invitation"); no link at all is `no_links`; links but no known CTA, or an email that cannot be
-    decoded, is `unclassified`.
+    invitation"); no link at all is `no_links`; links but no known CTA is `unclassified`. The parser is
+    lenient (a broken part is read as text), so every fetched email gets a category.
 * `Mailbox.inventory` holds the latest wait's record, success or failure; a failed wait's error carries
   it in its details. The broker returns it with each wait (`"inventory"`, read before the connection goes
   back to the pool, broker version 1.1.0), `EmiApi` hands it to its observers (`"inventory"`; from the
@@ -263,7 +263,9 @@ for pass/fail.
   `{run_id, test_id, timestamp, address, match_fields, before, after}`, each snapshot with `folders`
   (`messages`, `uidnext`), `total_messages` and `categories`.
 * **Owner**: the test the address names. The session probe's wait runs while the first test is being set
-  up, so it is logged as `C000000` and not attached to that test.
+  up, so it is logged as `C000000` and not attached to that test. The same rule holds for manifests (by
+  their test ID): the probe's manifests and inventories are attached only to tests that session setup
+  skipped, where they explain the skip.
 * No separate lookup: `GET /inventory` and `api.reader.inventory` are not built, since each would cost
   the fetches AMB-76 avoids.
 
@@ -676,8 +678,8 @@ User-facing details: `docs/ci_jobs.md`. Rule source: `.claude/rules/framework-ru
   runners, and the behaviour that differs most on Windows (broker detached auto-start, port binding,
   shared log-file locking, real socket errors) cannot be covered by unit-test simulations.
 * **Outside project status**: `ci-debug-run` (manual; test list, file or keyword; includes the broker log
-  for the run window and that day's port failures; can select the `docker` marker for layer-3 fault
-  tests) and one standalone unit job per tool (`unit-emi-reader`, `unit-emi-sender`,
+  for the run window and that day's port failures; the layer-3 outage tests run in `unit-outage`
+  instead) and one standalone unit job per tool (`unit-emi-reader`, `unit-emi-sender`,
   `unit-emi-test-broker`, `unit-emi-greenmail`, `unit-emi-harness`), each triggered by its own tool or
   unit-test folder and by hand (a change to `unittests/netfaults/` starts the reader and sender jobs);
   they never block.

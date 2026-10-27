@@ -52,17 +52,20 @@ class TestEMIHarnessEvidence:
         assert not plain.items
 
     def EMI_HARNESS_UNIT_200164_inventory_attached_and_logged(self, tmp_path: Path) -> None:
-        """A wait's inventory joins the running test's evidence and one line of the worker's jsonl (AMB-76)."""
+        """A wait's inventory joins the running test's evidence and one line of the worker's jsonl (AMB-76);
+        the session probe's manifest and inventory are kept apart from the test being set up."""
         state = HarnessState(resolved=None, error="", job=Job.P2, run_id=_RUN_ID, directory=tmp_path,
                              controller=JobController(Job.P2, budget_sec=None, stop_dir=tmp_path),
                              writer=ResultsWriter(tmp_path, "gw1"), inventory=InventoryLog(tmp_path, "gw1"))
         observe = _observer(state)
         observe("manifest", {"entries": []})  # no test running: dropped
         state.current = ItemInfo(case_id="C400001", priority="P2")
-        observe("inventory", {"address": f"qa+c000000_{_RUN_ID}@example.com"})  # the probe's, mid-setup
-        observe("manifest", {"entries": []})
+        observe("manifest", {"test_id": "C000000", "entries": []})  # the probe's, sent mid-setup
+        observe("inventory", {"address": f"qa+c000000_{_RUN_ID}@example.com"})
+        observe("manifest", {"test_id": "C400001", "entries": []})
         observe("inventory", {"address": "qa@example.com", "after": {"total_messages": 4}})
         assert [name for name, _data in state.current.evidence.items] == ["manifest", "inventory"]
+        assert [name for name, _data in state.session_evidence] == ["manifest", "inventory"]
         lines = (tmp_path / "inventory-gw1.jsonl").read_text(encoding="utf-8").splitlines()
         records = [json.loads(line) for line in lines]
         assert [record["test_id"] for record in records] == ["C000000", "C400001"]

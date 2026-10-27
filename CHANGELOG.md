@@ -7,6 +7,17 @@ reasoning behind each decision is in [CLAUDE_LOG.md](CLAUDE_LOG.md).
 
 ## Unreleased
 
+### Fixed
+* **The session probe's manifest was attached to the first test.** The probe email is sent while the
+  first test is being set up, so its manifest appeared in that test's evidence (seen as a second
+  `manifest` under C401009). Evidence now goes to the test it names (a manifest by its test ID, an
+  inventory by its address); the probe's items are attached only to tests that session setup skipped,
+  where they explain the skip.
+* **Design and RTM corrections.** They said `ci-debug-run` can select the outage tests; those run in
+  `unit-outage`. The inventory design said an undecodable email is `unclassified`; the parser never
+  fails, so every fetched email gets a category. The RTM records that `test-validity`'s faults check
+  passed on GitHub (run 40451473560).
+
 ## be46ae5 (2026-10-26)
 
 ### Changed
