@@ -136,6 +136,16 @@ class TestEMIBrokerHttp:
         fields = [wait["match_fields"] for mailbox in mailboxes.built for wait in mailbox.waits]
         assert fields == [("cc",), None]
 
+    def EMI_TEST_BROKER_UNIT_130080_emails_over_http_keep_bytes(
+        self, running: tuple[BrokerClient, SimMailboxes]
+    ) -> None:
+        """POST /emails returns each stored email with its bytes unchanged, non-ASCII included (AMB-74)."""
+        client, mailboxes = running
+        found = client.emails_to(("qa+C400001_r@example.com", "qa+C400001_r-1@example.com"), limit=1, timeout=5.0)
+        assert [(item.uid, item.address) for item in found] == [(1, "qa+C400001_r@example.com")]
+        assert found[0].raw.endswith("Prüfung\r\n".encode("latin-1"))
+        assert mailboxes.built[0].waits[-1]["limit"] == 1
+
     def EMI_TEST_BROKER_UNIT_130054_post_needs_the_token(self, running: tuple[BrokerClient, SimMailboxes]) -> None:
         """A request with a wrong token is refused (401) even after re-reading the state file."""
         client, _mailboxes = running

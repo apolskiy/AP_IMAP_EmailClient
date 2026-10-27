@@ -148,6 +148,31 @@ class TestEMIReaderWait:
         assert "/activate?" in link
         assert server.calls.count("fetch_messages") == 2  # the invitation at start, the activation later
 
+    def EMI_READER_UNIT_100121_emails_to_finds_every_email_at_the_address(self) -> None:
+        """Every email at the address on any field, matched or not, newest first, with its bytes (AMB-74)."""
+        clock = SimClock()
+        server = SimImap(clock)
+        activation = make_email(to_addr=_ADDRESS, test_id="C400001")
+        invitation = make_email(to_addr=_ADDRESS, label="Accept invitation", path="/invite/accept")
+        copied = make_email(cc_addr=_ADDRESS, test_id="C499999")
+        for raw in (activation, make_email(to_addr="someone@example.com"), invitation, copied):
+            server.deliver("INBOX", raw)
+        found = _mailbox(server, clock).emails_to((_ADDRESS, _ADDRESS.upper()))
+        assert [item.uid for item in found] == [4, 3, 1]
+        assert [item.raw for item in found] == [copied, invitation, activation]
+        assert {item.address for item in found} == {_ADDRESS} and found[0].subject == "Activate your account"
+        assert server.calls.count("fetch_messages") == 1
+
+    def EMI_READER_UNIT_100122_emails_to_keeps_the_newest(self) -> None:
+        """Only the newest ``limit`` emails are fetched; an address with no email yields none."""
+        clock = SimClock()
+        server = SimImap(clock)
+        for _index in range(5):
+            server.deliver("INBOX", make_email(to_addr=_ADDRESS))
+        mailbox = _mailbox(server, clock)
+        assert [item.uid for item in mailbox.emails_to((_ADDRESS,), limit=2)] == [5, 4]
+        assert not mailbox.emails_to(("nobody@example.com",))
+
 
 class TestEMIReaderRecipientFields:
     """``To`` by default; other fields only when selected (design §5.4)."""

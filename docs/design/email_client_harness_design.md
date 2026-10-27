@@ -307,7 +307,8 @@ printed as JSON by the CLI, saved in the run directory. Exit codes and keywords:
   per-host budget across runs.
 * **Endpoints**: `GET /health` (ready, version, config hash, pool usage, every setting and timeout with
   its source), `POST /send` (batch → manifest), `POST /wait` (address, CTA, marker, timeout → email /
-  link; long-poll), `GET /inventory`, `POST /lease` / heartbeat / release, `POST /purge`.
+  link; long-poll), `POST /emails` (addresses → raw emails for a failed test's report, AMB-74),
+  `GET /inventory`, `POST /lease` / heartbeat / release, `POST /purge`.
 * **Lifecycle**: `python -m emi_test_broker start|stop|status`; detached; idle shutdown after 30 min.
   **Auto-start**: a test's PRE step pings `/health`; if nothing answers it starts the broker once (binding
   the port is the lock), pings again, and skips with `TEST_BROKER_UNAVAILABLE` if still not ready.
@@ -388,6 +389,7 @@ api.health()                               # -> Health (ready, versions, setting
 api.sender.send(kind, address, count, ...) # -> Manifest
 api.reader.wait_for_link(address, cta, timeout=None)                 # -> str
 api.reader.wait_for_emails(address, cta=None, count=1, timeout=None) # -> list[ReceivedEmail]
+api.reader.emails_to(addresses, limit=30)  # -> list[RawEmail], newest first (report evidence, AMB-74)
 api.reader.inventory(addresses)            # -> Inventory (§5.8)
 api.greenmail.ready()                      # -> bool
 ```
@@ -512,8 +514,27 @@ history. Output in `reports/<run id>/`.
   endpoint) are kept when the test fails, and a test adds its own with `steps.attach(name, data)`. Each item
   becomes a JSON file listed in the test's results line, a section of the HTML report and, with Allure, a
   JSON attachment.
-* The raw email, the test broker's log entries for the test and the mailbox inventory (§5.8) are not yet
-  attached (RTM R-HN-06).
+* **Raw emails and broker log lines** (AMB-74), only for a test that failed or was skipped:
+  * **Every email at the test's addresses**, matched or not. After a test fails or is skipped, the harness
+    asks `api.reader.emails_to(addresses)` for the emails addressed to it. The addresses are the test's
+    own address and those in its own sender manifests (a manifest marked for another case, such as the
+    session's probe email sent while the first test sets up, is left out). The reader searches every readable folder on all
+    recipient fields and returns the newest 30 with folder, UID, address, subject and raw bytes. This
+    covers the emails a wait returned, those that reached the address without matching (another kind, a
+    wrong marker), and one that arrived after the wait gave up. A wait's result is left unchanged, so
+    passing tests cost nothing.
+  * Each email becomes `NN_email_<folder>_<uid>.eml`, and an `emails` JSON item lists them (folder, UID,
+    address, subject, size).
+  * **Size.** An email over 256 KB is cut at 256 KB and its file name ends `_truncated.eml`.
+  * **Cost.** One search per folder and field plus one fetch, through the broker's pooled connection
+    (`POST /emails`), only for tests that did not pass. A failure to collect them is noted in the evidence
+    and never changes the test's result.
+  * **Broker log lines.** In service mode, the lines of the broker's dated log (§7) between the test's
+    start and end that name its case ID (`test=C400001`, or an address `qa+C400001_...`) are written as
+    `NN_broker_log.log`. In-process mode has no broker; the evidence item says so instead.
+  * The `.eml` and `.log` files are listed in the results line like the JSON items, shown in the HTML
+    report (an email's first 20 KB as text), and attached to Allure as `message/rfc822` and `text/plain`.
+* The mailbox inventory (§5.8) is not yet attached (RTM R-RD-11).
 * **Allure views** (AMB-69, `emi_harness/allure_report.py`). Allure's Categories tab classifies only failed,
   broken and skipped results, by status and a regex on the message, and never shows passed tests; it
   cannot read labels. So:

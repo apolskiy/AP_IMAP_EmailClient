@@ -20,13 +20,14 @@ from http.client import HTTPConnection, HTTPException
 from types import TracebackType
 from typing import Any
 
-from emi_reader import Cta, ReceivedEmail
+from emi_reader import Cta, RawEmail, ReceivedEmail
 from emi_sender import BatchRequest, Manifest, Marker
 from emi_test_broker.codec import (
     batch_request_to_json,
     cta_to_json,
     error_from_json,
     manifest_from_json,
+    raw_email_from_json,
     received_from_json,
 )
 from emi_test_broker.errors import BrokerUnavailableError
@@ -324,6 +325,21 @@ class BrokerClient:
                    "match_fields": _fields(match_fields), "settle_window": settle_window}
         answer = self._post("/wait", payload, timeout + _CALL_MARGIN_SEC)
         return [received_from_json(item) for item in answer["emails"]]
+
+    def emails_to(self, addresses: tuple[str, ...], limit: int = 30, timeout: float = 30.0) -> list[RawEmail]:
+        """Every email at a failed test's addresses, for its report (AMB-74).
+
+        Args:
+            addresses: The test's addresses.
+            limit: Most emails returned.
+            timeout: Seconds to queue for a connection.
+
+        Returns:
+            The emails, newest first.
+        """
+        payload = {"addresses": list(addresses), "limit": limit, "timeout": timeout}
+        answer = self._post("/emails", payload, timeout + _CALL_MARGIN_SEC)
+        return [raw_email_from_json(item) for item in answer["emails"]]
 
     # --- leases and maintenance ------------------------------------------------------------------------
 

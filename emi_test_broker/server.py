@@ -96,6 +96,7 @@ class BrokerHandler(BaseHTTPRequestHandler):
         routes: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
             "/send": service.send,
             "/wait": service.wait,
+            "/emails": service.emails,
             "/lease": lambda body: service.lease("acquire", body),
             "/lease/heartbeat": lambda body: service.lease("heartbeat", body),
             "/lease/release": lambda body: service.lease("release", body),

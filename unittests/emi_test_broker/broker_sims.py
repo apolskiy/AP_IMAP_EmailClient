@@ -8,7 +8,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from emi_reader import Cta, ImapSettings, ParsedEmail, ReceivedEmail
+from emi_reader import Cta, ImapSettings, ParsedEmail, RawEmail, ReceivedEmail
 from emi_sender import BatchRequest, Manifest, ManifestEntry, Marker
 from emi_test_broker import BrokerService, BrokerSettings
 from emi_test_broker.server import bind, serve
@@ -69,6 +69,13 @@ class SimMailbox:
         """Return ``count`` emails."""
         self._wait(address=address, **options)
         return [received(address, uid) for uid in range(1, int(options.get("count", 1)) + 1)]
+
+    def emails_to(self, addresses: tuple[str, ...], limit: int = 30) -> list[RawEmail]:
+        """One stored email per address (bytes that are not ASCII, to prove they cross unchanged)."""
+        self._wait(addresses=addresses, limit=limit)
+        return [RawEmail(uid=index, folder="INBOX", address=address, subject="Activate",
+                         raw=f"To: {address}\r\nSubject: Activate\r\n\r\nPrüfung\r\n".encode("latin-1"))
+                for index, address in enumerate(addresses[:limit], 1)]
 
     def close(self) -> None:
         """Count closes."""

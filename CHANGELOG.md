@@ -8,6 +8,23 @@ reasoning behind each decision is in [CLAUDE_LOG.md](CLAUDE_LOG.md).
 ## Unreleased
 
 ### Added
+* **A failed or skipped test's emails and broker log lines in its report** (AMB-74). A failure's evidence
+  had manifests and error details but not the emails themselves, and CI discards the mailbox, so a wrong
+  link or a missing marker could not be checked afterwards. After such a test the harness now asks the
+  reader, through the test broker's pooled connection (new `POST /emails`, `api.reader.emails_to`), for
+  every email at the test's addresses, matched or not, newest 30. Each becomes an `.eml` attachment (cut
+  at 256 KB). The test broker's log lines of the test's window that name it become a `.log` attachment.
+  Both appear as files, in `report.html` and in Allure. Passing tests are unchanged. Collecting never
+  changes a result; a failure to collect is noted instead.
+
+### Changed
+* **README summary names every tool.** It spoke of one "tool"; it now lists the reader, sender, test
+  broker and Greenmail client with their folders, then the `EmiApi` library and the harness. The test
+  counts are updated for the 8 new unit tests (1,450 in total, 431 unit).
+
+## 861e03b (2026-10-26)
+
+### Added
 * **Job counts in the CI log and on the run page** (AMB-72). A job's log said only that it passed, and the
   run page showed a green or red mark; the counts were only in `report.html`. Every functional job now ends
   with a line such as `P2 job: 406 selected, 400 passed, 4 failed, 2 skipped, 0 without a result`, taken

@@ -1,15 +1,21 @@
 # AP_IMAP_EmailClient
 
-An email tool, a Python library and a test harness for end-to-end tests that wait for emails sent by
+Email tools, a Python library and a test harness for end-to-end tests that wait for emails sent by
 an application (account activation, site invitation, …) and extract the link behind the email's main
 button, with many tests running in parallel against one shared mailbox.
 
-The **tool** sends emails over SMTP (playing the application) and checks for them over IMAP. It runs
-as a background process, the test broker (port 8025), which every test run on the machine shares, along
-with its mail-server connections and its log. The tool also has command lines of its own
-(`python -m emi_sender`, `python -m emi_test_broker`). The **library** is the Python API tests call
-(`EmiApi`). It hands each send and wait to the tool rather than talking to the mail server itself. The
-**harness** runs the tests, applies priorities and gates, and writes the reports.
+**Four tools**, each in its own folder with its own unit tests and CI job:
+
+| Tool | Folder | What it does |
+|---|---|---|
+| **Reader** | `emi_reader/` | Waits over IMAP for a test's emails in the shared mailbox, read-only, and extracts the link behind the email's main button. |
+| **Sender** | `emi_sender/` | Plays the application: builds activation, invitation and generic emails from JSON templates and delivers them by SMTP or IMAP APPEND, one at a time or in batches. Command line: `python -m emi_sender`. |
+| **Test broker** | `emi_test_broker/` | A background process (port 8025) that every test run on the machine shares. It runs the sender and the reader on the runs' behalf, so they share its mail-server connections and its log. Command line: `python -m emi_test_broker`. |
+| **Greenmail client** | `emi_greenmail/` | Checks that the local Greenmail test mail server is ready and manages its users and mail through Greenmail's REST API. |
+
+The **library**, `EmiApi` (`emi_api/`), is the one Python API tests call. It hands each send and wait
+to the test broker rather than talking to the mail server itself. The **harness** (`emi_harness/`) runs
+the tests, applies priorities and gates, and writes the reports.
 
 > **Status:** implementation in progress. The reader, sender, Greenmail client, test broker, central
 > API (`EmiApi`) and test harness are built, unit-tested and checked against Greenmail, and the
@@ -201,7 +207,9 @@ operating systems in about 20 minutes.
 Reports go to `reports/<run>/<job>/`: `junit.xml`, `report.html`, `results-<worker>.jsonl` (one line
 per test with its keywords and step log), `settings.json` (every setting with its source, passwords
 hidden), `attachments/<case id>/` (per-test evidence: sender manifests, a failing tool's attempt
-history and folder accessibility matrix, anything a test attaches) and, with `--allure`,
+history and folder accessibility matrix, anything a test attaches, and for a test that failed or was
+skipped every email at its addresses as an `.eml` file, matched or not, plus the test broker's log lines
+naming it) and, with `--allure`,
 `allure-results/` (HTML too when the Allure CLI is installed, see step 5). Exit codes: `0` the job passed, `1` it failed, `2` it stopped early or an
 earlier job of the run aborted, `4` invalid options, `5` no tests selected.
 
@@ -302,7 +310,7 @@ user `qa` with the public password `password`, so nothing needs configuring. To 
 
 ## Test Counts
 
-**1,442 tests in total: 423 unit tests (50 of them network tests) and 1,019 functional tests.**
+**1,450 tests in total: 431 unit tests (50 of them network tests) and 1,019 functional tests.**
 
 **Unit tests**, one folder per tool, no server needed. A **network test** makes a connection fail
 (refused, closed port, port already taken, dropped or reset mid-session, timed out, connection limit,
@@ -311,13 +319,13 @@ marker, so `python -m pytest unittests -m network` runs them alone.
 
 | Tool | Folder | Unit tests | Of which network |
 |---|---|---|---|
-| Reader | `unittests/emi_reader/` | 84 | 19 |
+| Reader | `unittests/emi_reader/` | 86 | 19 |
 | Sender | `unittests/emi_sender/` | 69 | 15 |
-| Test broker | `unittests/emi_test_broker/` | 54 | 8 |
+| Test broker | `unittests/emi_test_broker/` | 55 | 8 |
 | Greenmail client | `unittests/emi_greenmail/` | 23 | 6 |
 | Central API (`EmiApi`) | `unittests/emi_api/` | 57 | 2 |
-| Harness | `unittests/emi_harness/` | 136 | 0 |
-| **Total** | | **423** | **50** |
+| Harness | `unittests/emi_harness/` | 141 | 0 |
+| **Total** | | **431** | **50** |
 
 **Functional tests** (`tests/functional/`, against Greenmail). Every functional test goes through the
 public API, so it drives the sender, the test broker and the reader together. The suite is therefore
@@ -435,7 +443,7 @@ says how much of it is built.
 
 | File | What it contains |
 |---|---|
-| [docs/design/phase0_email_client_ambiguities.md](docs/design/phase0_email_client_ambiguities.md) | **Ambiguity register (Phase 0).** Every open question (AMB-01 to AMB-73) with its severity, the options considered, the recommendation and the author's decision; the status of open questions; **Spike Evidence**: measurements and bugs found against a live Greenmail that decisions rest on. |
+| [docs/design/phase0_email_client_ambiguities.md](docs/design/phase0_email_client_ambiguities.md) | **Ambiguity register (Phase 0).** Every open question (AMB-01 to AMB-74) with its severity, the options considered, the recommendation and the author's decision; the status of open questions; **Spike Evidence**: measurements and bugs found against a live Greenmail that decisions rest on. |
 | [docs/design/email_client_harness_design.md](docs/design/email_client_harness_design.md) | **Design document (Phase 2)**, each section citing the register rows it implements (see the next table). |
 | [docs/rtm.md](docs/rtm.md) | **Requirements traceability matrix.** Each requirement → design section → code → unit test IDs → status (Done / Partial with the gap named / Planned). |
 | [docs/keywords.md](docs/keywords.md) | **Failure keyword catalog.** Keyword grammar; every `READER_`, `SENDER_`, `TEST_BROKER_`, `GREENMAIL_`, `API_`, `HARNESS_`, `CASE_` and `JOB_` keyword with its meaning, outcome (fail / skip / skip + stop / info) and the first thing to check. A unit test fails if code uses a keyword missing here. |

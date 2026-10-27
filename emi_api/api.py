@@ -28,7 +28,7 @@ from emi_api.errors import keywords_of
 from emi_api.identity import EmiRun, RunId, marker_for, worker_number
 from emi_api.settings import ClientMode, EmiSettings
 from emi_greenmail import GreenmailClient, GreenmailError
-from emi_reader import Cta, ReceivedEmail
+from emi_reader import Cta, RawEmail, ReceivedEmail
 from emi_sender import BatchRequest, Manifest, Marker
 from emi_test_broker import BrokerClient, BrokerService, LeaseKeeper, TestBrokerError
 
@@ -257,6 +257,18 @@ class ReaderApi:
                                              timeout=timeout or self._default_timeout, test_id=test_id,
                                              run_id=run_id, match_fields=match_fields,
                                              settle_window=settle_window)
+
+    def emails_to(self, addresses: tuple[str, ...], limit: int = 30) -> list[RawEmail]:
+        """Every email at the addresses, matched or not, newest first; report evidence, never pass/fail.
+
+        Args:
+            addresses: A failed test's addresses.
+            limit: Most emails returned.
+
+        Returns:
+            The emails with their raw bytes.
+        """
+        return self._backend.emails_to(tuple(addresses), limit)
 
 
 class EmiApi:  # pylint: disable=too-many-instance-attributes

@@ -27,6 +27,7 @@ from emi_test_broker.codec import (
     cta_from_json,
     manifest_to_json,
     marker_from_json,
+    raw_email_to_json,
     received_to_json,
 )
 from emi_test_broker.errors import PurgeRefusedError
@@ -180,6 +181,28 @@ class BrokerService:  # pylint: disable=too-many-instance-attributes
                        "queued_sec": round(timeout - remaining, 3)})
         _LOG.info("wait run=%s test=%s address=%s ok", run_id or "-", test_id or "-", address)
         return result
+
+    def emails(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """``POST /emails``: every email at a failed test's addresses, for its report (AMB-74).
+
+        Args:
+            payload: ``{"addresses": [...], "limit": 30, "timeout": 30}``.
+
+        Returns:
+            ``{"emails": [...]}``, newest first, bytes base64-encoded.
+        """
+        addresses = tuple(str(address) for address in _require(payload, "addresses"))
+        timeout = float(payload.get("timeout", 30.0))
+        with self._slot(timeout):
+            mailbox = self._take_mailbox()
+            healthy = False
+            try:
+                found = mailbox.emails_to(addresses, int(payload.get("limit", 30)))
+                healthy = True
+            finally:
+                self._return_mailbox(mailbox, healthy)
+        _LOG.info("emails addresses=%s found=%d", ",".join(addresses), len(found))
+        return {"emails": [raw_email_to_json(item) for item in found]}
 
     def lease(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
         """``POST /lease``, ``/lease/heartbeat``, ``/lease/release``.

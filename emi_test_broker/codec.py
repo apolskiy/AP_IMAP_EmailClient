@@ -6,11 +6,12 @@ Errors cross the wire with their class name and keywords and are rebuilt as the 
 client, so a test sees ``CASE_EMAIL_NOT_RECEIVED`` the same way in ``service`` and ``inprocess`` mode.
 """
 
+import base64
 from dataclasses import asdict, fields
 from typing import Any, TypeVar
 
 from emi_greenmail.errors import GreenmailError
-from emi_reader import Cta, ParsedEmail, ReaderError, ReceivedEmail
+from emi_reader import Cta, ParsedEmail, RawEmail, ReaderError, ReceivedEmail
 from emi_sender import BatchRequest, Field, Manifest, ManifestEntry, Marker, Order, Preset, SenderError
 from emi_test_broker.errors import RemoteError, TestBrokerError
 
@@ -141,6 +142,32 @@ def received_from_json(data: dict[str, Any]) -> ReceivedEmail:
                          html=email["html"], text=email["text"], test_id=email["test_id"], run_id=email["run_id"])
     return ReceivedEmail(uid=int(data["uid"]), folder=str(data["folder"]), email=parsed, link=data["link"],
                          secondary=tuple(data["secondary"]))
+
+
+def raw_email_to_json(item: RawEmail) -> dict[str, Any]:
+    """Describe a stored email; the bytes travel base64-encoded.
+
+    Args:
+        item: The email.
+
+    Returns:
+        Folder, UID, address, subject and ``raw_base64``.
+    """
+    return {"uid": item.uid, "folder": item.folder, "address": item.address, "subject": item.subject,
+            "raw_base64": base64.b64encode(item.raw).decode("ascii")}
+
+
+def raw_email_from_json(data: dict[str, Any]) -> RawEmail:
+    """Rebuild a stored email.
+
+    Args:
+        data: Output of :func:`raw_email_to_json`.
+
+    Returns:
+        The email.
+    """
+    return RawEmail(uid=int(data["uid"]), folder=str(data["folder"]), address=str(data["address"]),
+                    subject=str(data["subject"]), raw=base64.b64decode(data["raw_base64"]))
 
 
 def manifest_to_json(manifest: Manifest) -> dict[str, Any]:

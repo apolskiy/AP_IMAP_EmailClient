@@ -13,14 +13,32 @@ source, go to ``<job dir>/settings.json`` once per job, since every test of the 
 import json
 import re
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 ATTACHMENTS_DIR = "attachments"
 SETTINGS_FILE = "settings.json"
+SECTION_LIMIT = 20 * 1024
 _SAFE = re.compile(r"[^A-Za-z0-9_.-]+")
 
 Attacher = Callable[[str, str], None]
+FileAttacher = Callable[[str, bytes, str, str], None]
+
+
+@dataclass(frozen=True)
+class EvidenceFile:
+    """A non-JSON evidence item: a raw email (``.eml``) or log lines (``.log``).
+
+    Attributes:
+        content: The bytes written.
+        suffix: File extension without the dot.
+        mime: Media type for Allure.
+    """
+
+    content: bytes
+    suffix: str
+    mime: str
 
 
 def _plain(value: Any) -> Any:
@@ -49,19 +67,34 @@ def safe_name(value: str) -> str:
 class Evidence:
     """The evidence of one test, in the order it was added."""
 
-    def __init__(self, attacher: Attacher | None = None) -> None:
+    def __init__(self, attacher: Attacher | None = None, file_attacher: FileAttacher | None = None) -> None:
         """Start empty.
 
         Args:
             attacher: Also called with ``(name, JSON text)`` for each item (e.g. Allure's attach).
+            file_attacher: Also called with ``(name, bytes, media type, suffix)`` for each file item.
         """
         self._items: list[tuple[str, Any]] = []
         self._attacher = attacher
+        self._file_attacher = file_attacher
 
     @property
     def items(self) -> tuple[tuple[str, Any], ...]:
-        """Every ``(name, data)`` collected."""
+        """Every ``(name, data)`` collected; a file item's data is an :class:`EvidenceFile`."""
         return tuple(self._items)
+
+    def add_file(self, name: str, content: bytes, suffix: str, mime: str) -> None:
+        """Add one file item (a raw email, log lines).
+
+        Args:
+            name: What it is (``email_INBOX_42``, ``broker_log``).
+            content: The bytes.
+            suffix: File extension without the dot (``eml``, ``log``).
+            mime: Media type (``message/rfc822``, ``text/plain``).
+        """
+        self._items.append((name, EvidenceFile(content, suffix, mime)))
+        if self._file_attacher is not None:
+            self._file_attacher(name, content, mime, suffix)
 
     def add(self, name: str, data: Any) -> None:
         """Add one item.
@@ -108,8 +141,12 @@ class Evidence:
         folder.mkdir(parents=True, exist_ok=True)
         paths: list[str] = []
         for index, (name, data) in enumerate(self._items, 1):
-            path = folder / f"{index:02d}_{safe_name(name)}.json"
-            path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+            if isinstance(data, EvidenceFile):
+                path = folder / f"{index:02d}_{safe_name(name)}.{data.suffix}"
+                path.write_bytes(data.content)
+            else:
+                path = folder / f"{index:02d}_{safe_name(name)}.json"
+                path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
             paths.append(path.relative_to(job_directory).as_posix())
         return tuple(paths)
 
@@ -117,10 +154,19 @@ class Evidence:
         """The items as report sections (pytest-html shows them under the test).
 
         Returns:
-            ``(title, JSON text)`` pairs.
+            ``(title, text)`` pairs: JSON items in full, file items as text up to ``SECTION_LIMIT`` bytes.
         """
-        return [(f"EMI evidence: {name}", json.dumps(data, indent=2, ensure_ascii=False))
-                for name, data in self._items]
+        return [(f"EMI evidence: {name}", _section_text(data)) for name, data in self._items]
+
+
+def _section_text(data: Any) -> str:
+    """A report section's text: JSON, or a file's first ``SECTION_LIMIT`` bytes."""
+    if not isinstance(data, EvidenceFile):
+        return json.dumps(data, indent=2, ensure_ascii=False)
+    text = data.content[:SECTION_LIMIT].decode("utf-8", errors="replace")
+    if len(data.content) > SECTION_LIMIT:
+        text += f"\n... ({len(data.content) - SECTION_LIMIT} more bytes in the attachment file)"
+    return text
 
 
 def write_settings(job_directory: Path, described: dict[str, Any]) -> Path:

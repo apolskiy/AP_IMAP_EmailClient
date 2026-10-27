@@ -13,7 +13,7 @@ from emi_reader.errors import (
 )
 from emi_reader.keywords import ReaderCaseKeyword, ReaderKeyword
 from emi_reader.links import Cta, LinkExtractor, LinkResult, extract_link
-from emi_reader.mailbox import Mailbox, ReceivedEmail, WaitOptions
+from emi_reader.mailbox import Mailbox, RawEmail, ReceivedEmail, WaitOptions
 from emi_reader.mime import ParsedEmail, parse_email
 from emi_reader.settings import ImapSettings, Security
 from emi_reader.tokens import assert_link_for, token_payload, token_subject
@@ -30,6 +30,7 @@ __all__ = [
     "MailboxAccessError",
     "MimeDecodeError",
     "ParsedEmail",
+    "RawEmail",
     "ReaderCaseKeyword",
     "ReaderError",
     "ReaderKeyword",

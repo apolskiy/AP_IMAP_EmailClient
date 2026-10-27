@@ -12,10 +12,16 @@ import os
 import socket
 from typing import Any, Protocol
 
-from emi_reader import Cta, ReceivedEmail
+from emi_reader import Cta, RawEmail, ReceivedEmail
 from emi_sender import BatchRequest, Manifest, Marker
 from emi_test_broker import BrokerService
-from emi_test_broker.codec import batch_request_to_json, cta_to_json, manifest_from_json, received_from_json
+from emi_test_broker.codec import (
+    batch_request_to_json,
+    cta_to_json,
+    manifest_from_json,
+    raw_email_from_json,
+    received_from_json,
+)
 
 
 class MailBackend(Protocol):
@@ -39,6 +45,9 @@ class MailBackend(Protocol):
         settle_window: float | None = None,
     ) -> list[ReceivedEmail]:
         """Wait until exactly ``count`` matching emails are present."""
+
+    def emails_to(self, addresses: tuple[str, ...], limit: int = 30, timeout: float = 30.0) -> list[RawEmail]:
+        """Every email at a failed test's addresses, newest first (report evidence)."""
 
 
 class LocalBroker:
@@ -139,6 +148,20 @@ class LocalBroker:
                    "timeout": timeout, "test_id": test_id, "run_id": run_id,
                    "match_fields": _fields(match_fields), "settle_window": settle_window}
         return [received_from_json(item) for item in self._service.wait(payload)["emails"]]
+
+    def emails_to(self, addresses: tuple[str, ...], limit: int = 30, timeout: float = 30.0) -> list[RawEmail]:
+        """Every email at a failed test's addresses, for its report (AMB-74).
+
+        Args:
+            addresses: The test's addresses.
+            limit: Most emails returned.
+            timeout: Seconds to queue for a connection.
+
+        Returns:
+            The emails, newest first.
+        """
+        payload = {"addresses": list(addresses), "limit": limit, "timeout": timeout}
+        return [raw_email_from_json(item) for item in self._service.emails(payload)["emails"]]
 
     def close(self) -> None:
         """Close every pooled connection."""

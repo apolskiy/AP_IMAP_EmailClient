@@ -94,6 +94,25 @@ class ReceivedEmail:
         return self.email.subject
 
 
+@dataclass(frozen=True)
+class RawEmail:
+    """One email as stored, for a failed test's report (design §9.8, AMB-74).
+
+    Attributes:
+        uid: IMAP UID in its folder.
+        folder: Folder it was found in.
+        address: The test address it was found for.
+        subject: The decoded subject.
+        raw: The email's bytes as fetched.
+    """
+
+    uid: int
+    folder: str
+    address: str
+    subject: str
+    raw: bytes = field(repr=False)
+
+
 @dataclass
 class _Cursor:
     """Per-folder position: UIDs below ``next_uid`` have been looked at."""
@@ -286,6 +305,46 @@ class Mailbox:
         if newest.link is None:  # cannot happen: a CTA was requested, so every match has a link
             raise LinkExtractionError("matched email has no link", ReaderCaseKeyword.LINK_NOT_FOUND)
         return newest.link
+
+    def emails_to(self, addresses: tuple[str, ...], limit: int = 30) -> list[RawEmail]:
+        """Every email addressed to any of the addresses, matched or not, for a failed test's report.
+
+        Searches every readable folder on all recipient fields, so emails a wait skipped (another kind, a
+        wrong marker) and emails that arrived after it gave up are included. Never used for pass/fail.
+
+        Args:
+            addresses: The test's addresses.
+            limit: Most emails returned.
+
+        Returns:
+            The newest ``limit`` emails, newest first (per folder by UID, folders in configured order).
+        """
+        transport = self._connection()
+        wanted = tuple(dict.fromkeys(address.strip().lower() for address in addresses if address.strip()))
+        newest = sorted(self._located(transport, wanted), key=lambda item: item[1], reverse=True)[:max(limit, 0)]
+        emails: list[RawEmail] = []
+        for folder in dict.fromkeys(item[0] for item in newest):
+            chosen = {uid: address for name, uid, address in newest if name == folder}
+            transport.examine(folder)
+            for uid, raw in sorted(transport.fetch_messages(sorted(chosen)).items(), reverse=True):
+                emails.append(RawEmail(uid=uid, folder=folder, address=chosen[uid],
+                                       subject=parse_email(raw).subject, raw=raw))
+        return emails
+
+    def _located(self, transport: ImapTransport, addresses: tuple[str, ...]) -> list[tuple[str, int, str]]:
+        """``(folder, UID, address)`` of every email to the addresses, on all recipient fields, readable folders."""
+        access = probe_account(transport, self._settings.username, self._settings.folders)
+        self._last_access = access
+        found: list[tuple[str, int, str]] = []
+        for entry in (item for item in access if item.accessible):
+            transport.examine(entry.folder)
+            seen: set[int] = set()
+            for address in addresses:
+                target = _Target(address, None, None, None, tuple(_SEARCH_KEYS))
+                uids = [uid for uid in self._search_address(transport, target) if uid not in seen]
+                seen.update(uids)
+                found.extend((entry.folder, uid, address) for uid in uids)
+        return found
 
     def _wait(
         self,

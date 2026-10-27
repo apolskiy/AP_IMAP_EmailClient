@@ -22,10 +22,11 @@ from typing import Any
 
 import pytest
 
-from emi_api import EmiApi, EmiRun, RunId, default_backend, worker_number
+from emi_api import ClientMode, EmiApi, EmiRun, RunId, default_backend, worker_number
 from emi_harness.allure_report import priority_marks, record_outcome, write_categories
 from emi_harness.dependencies import DependencyTracker, dependency_groups, misplaced_parents, order_tests
-from emi_harness.evidence import Attacher, Evidence, write_settings
+from emi_harness.evidence import Attacher, Evidence, FileAttacher, write_settings
+from emi_harness.failure_evidence import collect
 from emi_harness.faults import NO_FAULT, apply_fault
 from emi_harness.jobs import JobController, StopDecision
 from emi_harness.keywords import CaseKeyword, HarnessKeyword
@@ -73,6 +74,7 @@ class HarnessState:  # pylint: disable=too-many-instance-attributes
     tracker: DependencyTracker | None = None
     hook: StepHook | None = None
     attacher: Attacher | None = None
+    file_attacher: FileAttacher | None = None
     current: ItemInfo | None = None
     counts_asserts: bool = False
     allure: bool = False
@@ -128,30 +130,35 @@ def pytest_configure(config: pytest.Config) -> None:
     directory = job_dir(reports, run_id, str(job))
     budget = resolved["job_timeout"] if resolved and resolved["job_timeout"] > 0 else _JOB_BUDGETS[job]
     worker = os.environ.get("PYTEST_XDIST_WORKER", "main")
-    hook, attacher = _allure(config)
+    allure_hooks = _allure(config)
     fault_run = bool(resolved) and resolved["fault"] != NO_FAULT
     state = HarnessState(resolved=resolved, error=error, job=job, run_id=run_id, directory=directory,
                          controller=JobController(job, budget_sec=budget, stop_dir=directory,
                                                   breaker=False if fault_run else None),
-                         writer=ResultsWriter(directory, worker), hook=hook, attacher=attacher,
-                         counts_asserts=bool(config.getini("enable_assertion_pass_hook")), allure=hook is not None)
+                         writer=ResultsWriter(directory, worker), hook=allure_hooks[0], attacher=allure_hooks[1],
+                         file_attacher=allure_hooks[2],
+                         counts_asserts=bool(config.getini("enable_assertion_pass_hook")),
+                         allure=allure_hooks[0] is not None)
     config.stash[_STATE] = state
     if state.allure:
         write_categories(Path(config.option.allure_report_dir))
 
 
-def _allure(config: pytest.Config) -> tuple[StepHook | None, Attacher | None]:
-    """``allure.step`` and a JSON ``allure.attach`` when Allure results are being written."""
+def _allure(config: pytest.Config) -> tuple[StepHook | None, Attacher | None, FileAttacher | None]:
+    """``allure.step``, a JSON ``allure.attach`` and a file ``allure.attach`` when Allure results are written."""
     if not getattr(config.option, "allure_report_dir", None):
-        return None, None
+        return None, None, None
     try:
         import allure  # pylint: disable=import-outside-toplevel
     except ImportError:
-        return None, None
+        return None, None, None
 
     def _attach(name: str, text: str) -> None:
         allure.attach(text, name=name, attachment_type=allure.attachment_type.JSON)
-    return allure.step, _attach
+
+    def _attach_file(name: str, content: bytes, mime: str, suffix: str) -> None:
+        allure.attach(content, name=name, attachment_type=mime, extension=suffix)
+    return allure.step, _attach, _attach_file
 
 
 def _functional(item: pytest.Item) -> bool:
@@ -208,7 +215,8 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     _check_dependency_order(depends, {cases[item.nodeid]: plan.priorities[item.nodeid] for item in functional})
     for item in functional:
         item.stash[_ITEM] = ItemInfo(case_id=cases[item.nodeid], priority=plan.priorities[item.nodeid],
-                                     timeout=_marker(item).get("timeout"), evidence=Evidence(state.attacher))
+                                     timeout=_marker(item).get("timeout"),
+                                     evidence=Evidence(state.attacher, state.file_attacher))
     if state.allure:
         _label_priorities(functional)
     kept, unmatched = _select(config, state, items, cases)
@@ -341,6 +349,22 @@ def _emi_run(api: EmiApi, request: pytest.FixtureRequest) -> EmiRun:
     return api.start_run(case_id)
 
 
+def _failure_evidence(item: pytest.Item, info: ItemInfo, state: HarnessState) -> None:
+    """After a test that did not pass: every email at its addresses and the broker log lines naming it (AMB-74).
+
+    Runs while the test's fixtures are still alive, so the evidence reaches the report built for this phase.
+    """
+    funcargs = getattr(item, "funcargs", {})
+    api, run = funcargs.get("api"), funcargs.get("emi_run")
+    if not isinstance(api, EmiApi) or not isinstance(run, EmiRun):
+        return
+    settings = state.resolved.emi_settings() if state.resolved else None
+    service = settings is not None and settings.mode is ClientMode.SERVICE
+    collect(info.evidence, fetch=api.reader.emails_to, own_address=run.address(),
+            log_dir=settings.broker.log_dir if settings is not None and service else None,
+            case_id=run.test_id, run_id=run.run_id, seconds=time.monotonic() - info.started)
+
+
 # --- running ---------------------------------------------------------------------------------------------
 
 @pytest.hookimpl(tryfirst=True)
@@ -394,6 +418,8 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) ->
         info.verdict = Verdict(Status.FAILED, CaseKeyword.UNEXPECTED_ERROR, (report.outcome,), False,
                                str(report.longrepr)[:500])
     if call.when == "call" or (call.when == "setup" and not report.passed):
+        if info.verdict is not None and info.verdict.status is not Status.PASSED:
+            _failure_evidence(item, info, state)
         report.sections.extend(info.evidence.sections())
     if call.when == "teardown":
         outcome = _finish(item, info, state)
