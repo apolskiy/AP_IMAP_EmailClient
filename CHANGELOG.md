@@ -7,6 +7,8 @@ reasoning behind each decision is in [CLAUDE_LOG.md](CLAUDE_LOG.md).
 
 ## Unreleased
 
+## ec0bdb3 (2026-10-27)
+
 ### Changed
 * **The RTM records the `test-validity` rerun (R-TV-02, R-TV-04).** Run 40583543917 caught all 9 named
   faults, and its stability check passed 3 repeats of all 1,034 functional tests with no findings, each
