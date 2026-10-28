@@ -7,6 +7,8 @@ reasoning behind each decision is in [CLAUDE_LOG.md](CLAUDE_LOG.md).
 
 ## Unreleased
 
+## 3554f1e (2026-10-28)
+
 ### Changed
 * **Every GitHub action now runs on Node.js 24.** `upload-artifact` v4 to v7, `download-artifact` v4 to
   v8, `cache` v4 to v6, `deploy-pages` v4 to v5 and `upload-pages-artifact` v3 to v5 (which uses
