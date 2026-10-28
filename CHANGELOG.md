@@ -7,6 +7,8 @@ reasoning behind each decision is in [CLAUDE_LOG.md](CLAUDE_LOG.md).
 
 ## Unreleased
 
+## fdb78c1 (2026-10-28)
+
 ### Fixed
 * **The published Allure report shows every test that should have run, once per operating system.**
   The report was built only from the results the jobs wrote, so a job that never started was invisible:
