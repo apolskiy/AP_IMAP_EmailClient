@@ -7,6 +7,14 @@ reasoning behind each decision is in [CLAUDE_LOG.md](CLAUDE_LOG.md).
 
 ## Unreleased
 
+### Changed
+* **Every GitHub action now runs on Node.js 24.** `upload-artifact` v4 to v7, `download-artifact` v4 to
+  v8, `cache` v4 to v6, `deploy-pages` v4 to v5 and `upload-pages-artifact` v3 to v5 (which uses
+  `upload-artifact` v7 inside). GitHub had deprecated Node.js 20 and warned on every run, test-validity
+  run 40583543917 included. The breaking changes of these releases do not apply here: the workflows
+  download by name or pattern, never by a single artifact ID, and upload whole folders, not single
+  unzipped files.
+
 ## ec0bdb3 (2026-10-27)
 
 ### Changed

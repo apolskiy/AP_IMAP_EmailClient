@@ -106,7 +106,7 @@ jobs:
       - name: Every unit-test folder
         run: python -m pytest unittests -p no:cacheprovider --junitxml=reports/unit/junit.xml
       - if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: unit-${{ runner.os }}
           path: reports/unit/
@@ -159,13 +159,13 @@ jobs:
       - run: python -m pip install -r requirements.txt -r requirements-dev.txt
       # One folder per operating system, so the gate checks each one for every chosen job.
       - name: Download the Ubuntu reports
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: reports-ubuntu-*
           path: all-reports/ubuntu
           merge-multiple: true
       - name: Download the Windows reports
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: reports-windows-*
           path: all-reports/windows
@@ -199,13 +199,13 @@ jobs:
           tar -xzf allure.tgz
           "./allure-${ALLURE_VERSION}/bin/allure" generate "${results[@]}" -o allure-report --clean
       - if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: allure-report
           path: allure-report/
           if-no-files-found: ignore
       - if: ${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/main' && hashFiles('allure-report/index.html') != '' }}
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: allure-report/
 
@@ -226,4 +226,4 @@ jobs:
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
       - id: deploy
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5

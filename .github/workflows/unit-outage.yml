@@ -53,7 +53,7 @@ jobs:
       - name: Outage tests
         run: python -m pytest unittests/outage -m docker -p no:cacheprovider --junitxml=reports/unit-outage/junit.xml
       - if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: unit-outage-${{ github.run_id }}
           path: reports/unit-outage/

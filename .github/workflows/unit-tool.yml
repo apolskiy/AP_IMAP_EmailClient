@@ -35,7 +35,7 @@ jobs:
       - name: ${{ inputs.tool }} unit tests
         run: python -m pytest unittests/${{ inputs.tool }} -p no:cacheprovider --junitxml=reports/unit/junit.xml
       - if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: unit-${{ inputs.tool }}-${{ runner.os }}
           path: reports/unit/
