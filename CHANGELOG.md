@@ -7,6 +7,12 @@ reasoning behind each decision is in [CLAUDE_LOG.md](CLAUDE_LOG.md).
 
 ## Unreleased
 
+### Changed
+* **The RTM records the `test-validity` rerun (R-TV-02, R-TV-04).** Run 40583543917 caught all 9 named
+  faults, and its stability check passed 3 repeats of all 1,034 functional tests with no findings, each
+  repeat in about 11 minutes. Run 40451473560's second repeat had timed out at about 15,600 messages in
+  INBOX; with each job deleting its own mail, INBOX held at most 3,429. R-TV-04 moved from Partial to Done.
+
 ## 9d14db8 (2026-10-27)
 
 ### Added
