@@ -187,17 +187,32 @@ jobs:
           done
           mkdir -p all-reports/ubuntu all-reports/windows
           python -m emi_harness.gate all-reports/ubuntu all-reports/windows "${expect[@]}"
+      # One entry per test and system; a chosen job that never ran shows each of its tests as broken.
       - name: Build the Allure report once, from both operating systems
         if: always()
         env:
           ALLURE_VERSION: "2.30.0"
+          MANUAL: ${{ github.event_name == 'workflow_dispatch' }}
+          RUN_P0: ${{ inputs.p0 }}
+          RUN_P1: ${{ inputs.p1 }}
+          RUN_P2: ${{ inputs.p2 }}
+          RUN_P3: ${{ inputs.p3 }}
+          RUN_P4: ${{ inputs.p4 }}
         run: |
-          shopt -s nullglob
-          results=(all-reports/*/reports/*/*/allure-results)
-          if [ ${#results[@]} -eq 0 ]; then echo "no Allure results"; exit 0; fi
+          expect=()
+          for job in P0 P1 P2 P3 P4; do
+            chosen="RUN_$job"
+            if [ "$MANUAL" != "true" ] || [ "${!chosen}" = "true" ]; then expect+=(--expect "$job"); fi
+          done
+          mkdir -p all-reports/ubuntu all-reports/windows
+          code=0
+          python -m emi_harness.allure_merge allure-results --os ubuntu=all-reports/ubuntu \
+            --os windows=all-reports/windows "${expect[@]}" || code=$?
+          if [ "$code" = "2" ]; then echo "no Allure results"; exit 0; fi
+          if [ "$code" != "0" ]; then exit "$code"; fi
           curl -fsSL -o allure.tgz "https://github.com/allure-framework/allure2/releases/download/${ALLURE_VERSION}/allure-${ALLURE_VERSION}.tgz"
           tar -xzf allure.tgz
-          "./allure-${ALLURE_VERSION}/bin/allure" generate "${results[@]}" -o allure-report --clean
+          "./allure-${ALLURE_VERSION}/bin/allure" generate allure-results -o allure-report --clean
       - if: always()
         uses: actions/upload-artifact@v7
         with:

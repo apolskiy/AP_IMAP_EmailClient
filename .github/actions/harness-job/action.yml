@@ -67,17 +67,23 @@ runs:
         path: .emi-previous
 
     # Relative paths only: in Git Bash on Windows a backslash runner path would be read as escapes.
+    # download-artifact unpacks a single matching artifact straight into the path and several into
+    # one folder each, so the results sit at either depth.
     - name: Put the earlier jobs' results in place
       if: inputs.previous != ''
       shell: bash
       run: |
+        shopt -s nullglob
         : > .emi-previous/copied.txt
-        for job in .emi-previous/*/reports/*/*/; do
-          relative="${job#.emi-previous/*/}"
+        for job in .emi-previous/reports/*/*/ .emi-previous/*/reports/*/*/; do
+          relative="reports/${job#*/reports/}"
           mkdir -p "$relative" && cp -R "$job". "$relative"
           echo "$relative" >> .emi-previous/copied.txt
         done
         cat .emi-previous/copied.txt
+        if [ ! -s .emi-previous/copied.txt ]; then
+          echo "::error::no earlier job results found in the downloaded artifacts"; exit 1
+        fi
 
     - name: Run the harness
       id: run

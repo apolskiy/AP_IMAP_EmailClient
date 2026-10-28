@@ -89,12 +89,22 @@ def absent_jobs(directories: Sequence[Path], expected: Sequence[str]) -> list[st
     Returns:
         One line per job and directory without a collection.
     """
-    lines = []
-    for directory in directories:
-        collected = {path.parent.name for path in directory.rglob(_COLLECTION_FILE)}
-        lines.extend(f"job {job} left no {_COLLECTION_FILE} in {directory} (it never started or failed before "
-                     "selecting tests)" for job in expected if job not in collected)
-    return lines
+    return [f"job {job} left no {_COLLECTION_FILE} in {directory} (it never started or failed before selecting "
+            "tests)" for directory in directories for job in absent_job_names(directory, expected)]
+
+
+def absent_job_names(directory: Path, expected: Sequence[str]) -> list[str]:
+    """The chosen jobs that left no ``collection.json`` in one directory.
+
+    Args:
+        directory: One report directory.
+        expected: Names of the jobs chosen to run.
+
+    Returns:
+        The job names, in the order given.
+    """
+    collected = {path.parent.name for path in directory.rglob(_COLLECTION_FILE)}
+    return [job for job in expected if job not in collected]
 
 
 def missing_results(directory: Path) -> list[TestOutcome]:

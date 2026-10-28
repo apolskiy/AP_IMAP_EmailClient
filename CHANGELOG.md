@@ -7,6 +7,26 @@ reasoning behind each decision is in [CLAUDE_LOG.md](CLAUDE_LOG.md).
 
 ## Unreleased
 
+### Fixed
+* **The published Allure report shows every test that should have run, once per operating system.**
+  The report was built only from the results the jobs wrote, so a job that never started was invisible:
+  after run 40722598720, where P1 failed before running a test and P2 to P4 never started, the report on
+  GitHub Pages showed 5 passed tests and nothing failed or skipped. A new step,
+  `python -m emi_harness.allure_merge`, now runs in `quality-gate` before `allure generate`. It lists the
+  tests of each chosen job that never ran with `pytest --collect-only` and adds each as broken with
+  `[JOB_RESULT_MISSING]` under its priority, as it does for a test a job selected but wrote no result
+  for. It also gives every result an `OS` parameter, because Allure had taken the Ubuntu and Windows
+  results of a test for retries of one test and showed only the later one, so a failure on one system
+  could hide behind a pass on the other. Replayed on run 40722598720's artifacts, the report shows
+  2,068 entries: 10 passed and 2,058 broken under "Job stopped". Design §9.8, unit tests 200167 to
+  200170.
+* **P1 finds P0's results again after the `download-artifact` upgrade.** Since v5, a pattern that
+  matches a single artifact unpacks it straight into the download folder, and several still unpack into
+  one folder each. P1 matches only P0's artifact, so the copy step, which looked one folder deeper,
+  found nothing and failed P1 on both systems in `ci-regression-run` run 40722598720 (P2 to P4 then did
+  not run). The step now accepts both layouts and still fails when it finds no results at all, since
+  without them a failed parent's dependents would run instead of being skipped.
+
 ## 3554f1e (2026-10-28)
 
 ### Changed

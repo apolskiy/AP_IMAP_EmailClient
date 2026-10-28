@@ -279,7 +279,11 @@ after each run on `main`.
   emails than expected, link problems, verification failed, other test-case failures. Each message starts
   with its keyword, e.g. `[CASE_EMAIL_NOT_RECEIVED] step S02 ...`. Allure lists only failed, broken and
   skipped tests here, so the tab is empty when everything passed.
-* A test that ran on both Windows and Ubuntu appears once, with the other run under **Retries**.
+* Every test appears once per operating system, told apart by its `OS` parameter, so a failure on one
+  system cannot hide behind a pass on the other.
+* Tests that should have run but did not are shown too, as **broken** with `[JOB_RESULT_MISSING]` under
+  "Job stopped": every test of a chosen job that never started (for example P2 to P4 after P1 failed to
+  start), and every test a job selected but wrote no result for.
 
 **Counts without opening a report.** Every job ends with a line such as
 `P2 job: 406 selected, 400 passed, 4 failed, 2 skipped, 0 without a result`. In GitHub Actions the same
@@ -346,7 +350,7 @@ where it came from (`argument`, `cli`, `env`, `.env` or `default`), passwords hi
 
 ## Test Counts
 
-**1,513 tests in total: 479 unit tests (66 of them network tests, 4 outage tests run apart) and 1,034
+**1,517 tests in total: 483 unit tests (66 of them network tests, 4 outage tests run apart) and 1,034
 functional tests.**
 
 **Unit tests**, one folder per tool, no server needed. A **network test** makes a connection fail
@@ -370,8 +374,8 @@ to a functional run. Without Docker or the container they are skipped (`HARNESS_
 | Greenmail client | `unittests/emi_greenmail/` | 23 | 6 | |
 | Option table | `unittests/emi_config/` | 5 | 0 | |
 | Central API (`EmiApi`) | `unittests/emi_api/` | 59 | 2 | 1 |
-| Harness | `unittests/emi_harness/` | 145 | 0 | |
-| **Total** | | **475** | **66** | **4** |
+| Harness | `unittests/emi_harness/` | 149 | 0 | |
+| **Total** | | **479** | **66** | **4** |
 
 **Functional tests** (`tests/functional/`, against Greenmail). Every functional test goes through the
 public API, so it drives the sender, the test broker and the reader together. The suite is therefore

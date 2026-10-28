@@ -663,6 +663,18 @@ history. Output in `reports/<run id>/`.
     cause) and message `[KEYWORD] step Snn message (secondary: ...)`. Allure would otherwise record the
     exception text without the keyword, and no message at all for failures the harness decides itself
     (`CASE_NO_VERIFICATION`, `CASE_TIMEOUT`).
+* **The published report shows every test that should have run** (`emi_harness/allure_merge.py`, run by
+  `quality-gate` before `allure generate`). Allure shows only the results it is given, so on their own the
+  jobs' `allure-results` hide what did not run. The merge builds one results folder from both systems:
+  * **One entry per test and system.** Each result gets an `OS` parameter and a history ID of its own per
+    system. Otherwise Allure takes the Ubuntu and Windows results of a test for retries of one test and
+    shows only the later one, so a failure on one system could hide behind a pass on the other.
+  * **A test selected but without a result** (a crashed worker, a killed runner) is added as `broken` with
+    `[JOB_RESULT_MISSING]`, as the gate counts it.
+  * **A chosen job that never ran its tests** left no `collection.json` and no results. Its tests are
+    listed with `pytest --collect-only` (the plugin writes the same `collection.json`; no mail server
+    needed) and each is added as `broken` with `[JOB_RESULT_MISSING]`, under its priority's labels. They
+    fall into the "Job stopped" category, and the report's totals include them.
 * **Job counts** (AMB-72, `emi_harness/summary.py`). A CI job's log otherwise shows only pytest's own
   line, and the run page only a green or red mark. The counts come from the job's harness results, so
   they agree with the gates:

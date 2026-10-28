@@ -76,6 +76,7 @@ live in `docs/design/phase0_email_client_ambiguities.md`; this log records when 
 | 2026-10-27 | The sender CLI sends directly by default and goes through the broker only with `--via-broker`, so the sender works without the broker; the broker package is imported only then | AMB-84 |
 | 2026-10-27 | `expected_folder` on `wait_for_link` / `wait_for_emails`, through `EmiApi` and the broker's `/wait`: an unreadable folder ends the wait at once with `READER_MAILBOX_EXPECTED_FOLDER_INACCESSIBLE` (environment); on the shared poller it ends only that wait; a folder that is not configured is a `ValueError` | AMB-85 |
 | 2026-10-27 | Closed, not built: a connection per worker in `inprocess` mode (superseded by the shared poller), several accounts, a generated `docs/keywords.md`, the Gmail queue, and the remaining functional cases. The README's "Designed but Not Yet Implemented" section became part of "What Was Left Out" | AMB-86 |
+| 2026-10-28 | The published Allure report shows every test that should have run, once per operating system: `emi_harness.allure_merge` gives each result an `OS` parameter and its own history ID per system (Allure had shown one system's result as a retry of the other's), and adds each test of a chosen job that never ran (listed with `pytest --collect-only`) or that has no result as `broken` with `[JOB_RESULT_MISSING]`. Broken rather than skipped, since the job, not the test, failed; per test rather than one entry per job, so the totals are right | design §9.8 |
 
 ## Pylint scores
 
@@ -94,3 +95,4 @@ live in `docs/design/phase0_email_client_ambiguities.md`; this log records when 
 | 2026-10-26 | all tools, `unittests` (with `netfaults/` and `outage/`), `tests`, `conftest.py`, after AMB-75 to AMB-77 (449 unit tests pass, 4 outage tests pass against Docker Desktop, no pylint messages) | **10.00/10** |
 | 2026-10-27 | all tools, `unittests`, `tests`, after AMB-79 and AMB-80 (464 unit tests pass, no pylint messages) | **10.00/10** |
 | 2026-10-27 | all tools incl. `emi_config`, `unittests`, `tests`, `conftest.py`, after AMB-81 to AMB-86 (475 unit tests pass, no pylint messages) | **10.00/10** |
+| 2026-10-28 | all tools incl. `emi_config`, `unittests`, `tests`, `conftest.py`, with `emi_harness/allure_merge.py` (479 unit tests pass, no pylint messages) | **10.00/10** |

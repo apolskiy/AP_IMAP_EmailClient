@@ -52,6 +52,18 @@ CATEGORIES: list[dict[str, Any]] = [
 ]
 
 
+def priority_labels(priority: str) -> list[tuple[str, str]]:
+    """The Allure labels of a test of this priority, as (label type, value) pairs.
+
+    Args:
+        priority: ``P0`` ... ``P4``.
+
+    Returns:
+        ``parentSuite``, ``severity`` and ``tag`` labels.
+    """
+    return [("parentSuite", priority), ("severity", _SEVERITY.get(priority, "normal")), ("tag", priority)]
+
+
 def priority_marks(priority: str) -> list[pytest.MarkDecorator]:
     """The Allure labels of a test of this priority, as the markers allure-pytest reads.
 
@@ -61,9 +73,7 @@ def priority_marks(priority: str) -> list[pytest.MarkDecorator]:
     Returns:
         ``parentSuite``, ``severity`` and ``tag`` labels.
     """
-    label = pytest.mark.allure_label
-    return [label(priority, label_type="parentSuite"), label(_SEVERITY.get(priority, "normal"), label_type="severity"),
-            label(priority, label_type="tag")]
+    return [pytest.mark.allure_label(value, label_type=label_type) for label_type, value in priority_labels(priority)]
 
 
 def write_categories(results_dir: Path) -> None:

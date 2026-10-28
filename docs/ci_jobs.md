@@ -99,7 +99,9 @@ to the run's summary page under a title such as `P2 job (Linux)`, followed by up
 pass with their keyword, step and message. `quality-gate` adds its per-priority report there too.
 
 **Allure on GitHub Pages:** after a run on `main`, the `quality-gate` job builds one Allure report from
-both operating systems' results, and `allure-pages` publishes it. Turn this on once under *Settings →
+both operating systems' results, and `allure-pages` publishes it. `python -m emi_harness.allure_merge`
+first joins the results with each test once per system, and adds every test of a chosen job that never
+ran, or that a job selected but wrote no result for, as broken with `[JOB_RESULT_MISSING]` (design §9.8). Turn this on once under *Settings →
 Pages → Source: GitHub Actions*. Until then `allure-pages` fails without affecting project status, and
 the report is still available as the `allure-report` artifact of every run.
 
